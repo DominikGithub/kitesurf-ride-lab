@@ -1,6 +1,6 @@
 import { createReadStream, existsSync, statSync } from "node:fs";
 import { createServer } from "node:http";
-import { extname, join, normalize, resolve } from "node:path";
+import { extname, join, normalize, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(fileURLToPath(new URL(".", import.meta.url)));
@@ -45,7 +45,7 @@ const server = createServer((request, response) => {
 
   const requested = pathname === "/" ? "/index.html" : pathname;
   const filePath = normalize(join(publicRoot, requested));
-  if (!filePath.startsWith(`${publicRoot}/`)) {
+  if (!filePath.startsWith(`${publicRoot}${sep}`)) {
     response.writeHead(403);
     response.end("Forbidden");
     return;

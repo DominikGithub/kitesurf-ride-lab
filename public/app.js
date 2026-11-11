@@ -502,7 +502,8 @@ function loadMapTiles(points, width, height, tileContainer, requestedZoom = null
       tile.alt = "";
       tile.loading = "eager";
       tile.decoding = "async";
-      tile.referrerPolicy = "no-referrer";
+      // OpenStreetMap's tile servers block requests that carry no Referer; this sends the origin only, never the path.
+      tile.referrerPolicy = "strict-origin-when-cross-origin";
       tile.src = `https://tile.openstreetmap.org/${selectedZoom}/${tileXWrapped(tileX, tileCount)}/${tileY}.png`;
       tile.style.left = `${tileX * 256 - viewportLeft}px`;
       tile.style.top = `${tileY * 256 - viewportTop}px`;
@@ -768,6 +769,19 @@ function drawSegmentedMap(canvas, segmentation, options = {}) {
     const section = segmentation.sections[index];
     const color = section.type === "active" ? sectionColor(index) : "#9ba5a3";
     drawSectionMarker(context, point, String(index + 1), selected?.id === section.id, color);
+  });
+
+  // Turn points between the legs of the selected section.
+  (selected?.legs ?? []).slice(1).forEach((leg) => {
+    const point = projectedPoints.find((candidate) => candidate.index >= leg.startIndex);
+    if (!point) return;
+    context.fillStyle = "#fbfcf8";
+    context.strokeStyle = "#17252a";
+    context.lineWidth = 1.5;
+    context.beginPath();
+    context.arc(point.x, point.y, 3.5, 0, Math.PI * 2);
+    context.fill();
+    context.stroke();
   });
 
   const start = projectedPoints[0];
@@ -1075,6 +1089,12 @@ function renderSegmentList(segmentation) {
     meta.className = "segment-card-meta";
     meta.textContent = `${formatTime(section.startTimestamp)} · ${formatDuration(section.duration)} · ${formatDistance(section.distance)}`;
     body.append(title, meta);
+    if (section.legs.length) {
+      const legs = document.createElement("small");
+      legs.className = "segment-card-meta";
+      legs.textContent = `${number(section.legs.length)} ${section.legs.length === 1 ? "leg" : "legs"} · median ${formatDuration(section.medianLegDuration)}`;
+      body.append(legs);
+    }
     if (section.averageHeartRate !== null) {
       const heart = document.createElement("small");
       heart.className = "segment-card-heart";
@@ -1103,7 +1123,7 @@ function renderRideSegments(summary) {
   setText("#segmentsActiveTime", formatDuration(segmentation.activeDuration));
   setText("#segmentsAverageSpeed", formatSpeed(averageSpeed));
   setText("#segmentsDistance", formatDistance(segmentation.activeDistance));
-  setText("#segmentsSummaryCopy", `The track is split into speed-defined sections for comparing active riding, inactive periods, distance, and heart-rate response. Active sections require ${number(segmentation.options.minimumActiveWindows)} consecutive ${number(segmentation.options.windowSeconds)}-second windows above ${formatSpeed(segmentation.options.activeSpeedMps)}; the complete timeline is shown below.`);
+  setText("#segmentsSummaryCopy", `The track is split into speed-defined sections for comparing active riding, inactive periods, distance, and heart-rate response. An active section is at least ${number(segmentation.options.minimumActiveSeconds)} seconds where the ${number(segmentation.options.smoothingSeconds)}-second median speed stays above ${formatSpeed(segmentation.options.activeSpeedMps)}, with stops shorter than ${number(segmentation.options.mergeGapSeconds)} seconds bridged. Active sections are divided into legs at turns; ${number(segmentation.legCount)} ${segmentation.legCount === 1 ? "leg was" : "legs were"} found. The complete timeline is shown below.`);
   setText("#segmentsListMeta", `${number(segmentation.sections.length)} detected`);
   setText("#segmentsMapAccuracy", summary.gpsAccuracy === null ? "" : `avg GPS ±${number(summary.gpsAccuracy, 1)} m`);
   setText("#segmentsMapPointCount", `${number(map.count)} points`);

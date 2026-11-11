@@ -1,4 +1,6 @@
-sample_data/*
+
 __pycache__/*
 .env
-.fit
+*.fit
+*.FIT
+suunto fit/*

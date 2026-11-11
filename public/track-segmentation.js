@@ -3,11 +3,16 @@ import { getField } from "./fit-decoder.js";
 export const DEFAULT_SEGMENTATION_OPTIONS = Object.freeze({
   activeSpeedMps: 3.5,
   lowMovementSpeedMps: 1.8,
-  windowSeconds: 60,
-  minimumWindowSamples: 30,
-  minimumActiveWindows: 2,
+  smoothingSeconds: 15,
+  mergeGapSeconds: 25,
+  minimumActiveSeconds: 45,
   maximumIntervalSeconds: 5,
   maximumGpsGapSeconds: 30,
+  legHeadingSpanSeconds: 6,
+  legTurnDegrees: 70,
+  legTurnHoldSeconds: 8,
+  minimumLegSeconds: 15,
+  minimumHeadingDistanceMetres: 5,
 });
 
 function finite(value) {
@@ -55,6 +60,7 @@ export function normalizeTrackRecords(records) {
       index,
       timestamp: finite(timestamp) ? timestamp : null,
       speed: speedForRecord(record, previous),
+      smoothedSpeed: null,
       heartRate: getField(record, "heart_rate"),
       position: positionForRecord(record),
       distance: finite(distance) && distance >= 0 ? distance : null,
@@ -84,69 +90,68 @@ function buildRouteRuns(records, maximumGpsGapSeconds) {
   return runs.filter((run) => run.length >= 2);
 }
 
-function buildMovementWindows(records, options) {
-  const timestamped = records.filter((record) => finite(record.timestamp));
-  if (!timestamped.length) return { firstTimestamp: null, windows: [] };
-  const firstTimestamp = timestamped[0].timestamp;
-  const lastTimestamp = timestamped.at(-1).timestamp;
-  const windowCount = Math.floor((lastTimestamp - firstTimestamp) / options.windowSeconds) + 1;
-  const windows = Array.from({ length: windowCount }, (_, bucket) => ({
-    bucket,
-    startTimestamp: firstTimestamp + bucket * options.windowSeconds,
-    endTimestamp: firstTimestamp + (bucket + 1) * options.windowSeconds,
-    records: [],
-    speeds: [],
-    state: "unknown",
-    medianSpeed: null,
-  }));
-
-  timestamped.forEach((record) => {
-    const bucket = Math.floor((record.timestamp - firstTimestamp) / options.windowSeconds);
-    if (bucket < 0 || bucket >= windows.length) return;
-    windows[bucket].records.push(record);
-    if (finite(record.speed) && record.speed >= 0) windows[bucket].speeds.push(record.speed);
-  });
-
-  windows.forEach((window) => {
-    window.medianSpeed = median(window.speeds);
-    if (window.speeds.length < options.minimumWindowSamples || window.medianSpeed === null) return;
-    window.state = window.medianSpeed > options.activeSpeedMps
-      ? "active"
-      : window.medianSpeed < options.lowMovementSpeedMps ? "low movement" : "slow transit";
-  });
-  return { firstTimestamp, windows };
-}
-
-function activeWindowRuns(windows, options) {
-  const runs = [];
-  for (let index = 0; index < windows.length;) {
-    if (windows[index].state !== "active") {
-      index += 1;
-      continue;
+// Centred rolling median, so one-off speed spikes and brief dips do not move section boundaries.
+function smoothSpeeds(timed, smoothingSeconds) {
+  const half = smoothingSeconds / 2;
+  let lower = 0;
+  let upper = 0;
+  timed.forEach((record, position) => {
+    while (lower < position && timed[lower].timestamp < record.timestamp - half) lower += 1;
+    while (upper < timed.length && timed[upper].timestamp <= record.timestamp + half) upper += 1;
+    const speeds = [];
+    for (let index = lower; index < upper; index += 1) {
+      if (finite(timed[index].speed) && timed[index].speed >= 0) speeds.push(timed[index].speed);
     }
-    const start = index;
-    while (windows[index + 1]?.state === "active") index += 1;
-    if (index - start + 1 >= options.minimumActiveWindows) runs.push({ start, end: index });
-    index += 1;
-  }
-  return runs;
-}
-
-function completeWindowRuns(windows, activeRuns) {
-  const runs = [];
-  let cursor = 0;
-  activeRuns.forEach((activeRun) => {
-    if (cursor < activeRun.start) runs.push({ start: cursor, end: activeRun.start - 1, type: "inactive" });
-    runs.push({ ...activeRun, type: "active" });
-    cursor = activeRun.end + 1;
+    record.smoothedSpeed = median(speeds);
   });
-  if (cursor < windows.length) runs.push({ start: cursor, end: windows.length - 1, type: "inactive" });
-  return runs;
 }
 
-function recordRanges(records, startTimestamp, endTimestamp, maximumIntervalSeconds) {
-  const selected = records.filter((record) => finite(record.timestamp)
+function activeIntervals(timed, options) {
+  const raw = [];
+  let current = null;
+  timed.forEach((record, position) => {
+    const previous = timed[position - 1];
+    const paused = Boolean(previous) && record.timestamp - previous.timestamp > options.maximumIntervalSeconds;
+    const active = record.smoothedSpeed !== null && record.smoothedSpeed > options.activeSpeedMps;
+    if (current && (paused || !active)) {
+      current.end = paused ? previous.timestamp + 1 : record.timestamp;
+      raw.push(current);
+      current = null;
+    }
+    if (active && !current) current = { start: record.timestamp, end: null };
+  });
+  if (current) {
+    current.end = timed.at(-1).timestamp + 1;
+    raw.push(current);
+  }
+
+  const merged = [];
+  raw.forEach((interval) => {
+    const last = merged.at(-1);
+    if (last && interval.start - last.end <= options.mergeGapSeconds) last.end = interval.end;
+    else merged.push({ ...interval });
+  });
+  return merged.filter((interval) => interval.end - interval.start >= options.minimumActiveSeconds);
+}
+
+function timelineSpans(startTimestamp, endTimestamp, intervals) {
+  const spans = [];
+  let cursor = startTimestamp;
+  intervals.forEach((interval) => {
+    if (interval.start > cursor) spans.push({ start: cursor, end: interval.start, type: "inactive" });
+    spans.push({ start: interval.start, end: interval.end, type: "active" });
+    cursor = interval.end;
+  });
+  if (cursor < endTimestamp) spans.push({ start: cursor, end: endTimestamp, type: "inactive" });
+  return spans;
+}
+
+function recordsBetween(records, startTimestamp, endTimestamp) {
+  return records.filter((record) => finite(record.timestamp)
     && record.timestamp >= startTimestamp && record.timestamp < endTimestamp);
+}
+
+function recordRanges(selected, maximumIntervalSeconds) {
   if (!selected.length) return [];
   const ranges = [];
   let start = selected[0].index;
@@ -180,6 +185,10 @@ function bearingBetween(start, end) {
   const x = Math.cos(startLatitude) * Math.sin(endLatitude)
     - Math.sin(startLatitude) * Math.cos(endLatitude) * Math.cos(longitude);
   return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+}
+
+function angleDifference(from, to) {
+  return Math.abs(((to - from + 540) % 360) - 180);
 }
 
 function directionStats(records, ranges, maximumGpsGapSeconds) {
@@ -220,9 +229,8 @@ function intervalStats(records, startTimestamp, endTimestamp, maximumIntervalSec
   return { activeSeconds, distance, averageSpeed: activeSeconds ? distance / activeSeconds : null };
 }
 
-function sectionHeartRate(records, startTimestamp, endTimestamp) {
-  const values = records.filter((record) => record.timestamp >= startTimestamp && record.timestamp < endTimestamp
-    && finite(record.heartRate) && record.heartRate > 0).map((record) => record.heartRate);
+function sectionHeartRate(selected) {
+  const values = selected.filter((record) => finite(record.heartRate) && record.heartRate > 0).map((record) => record.heartRate);
   if (!values.length) return { average: null, trend: null };
   const split = Math.max(1, Math.floor(values.length * 0.2));
   const first = average(values.slice(0, split));
@@ -230,37 +238,100 @@ function sectionHeartRate(records, startTimestamp, endTimestamp) {
   return { average: average(values), trend: values.length >= 4 ? last - first : null };
 }
 
-function inactiveState(windows, run) {
-  const counts = new Map();
-  windows.slice(run.start, run.end + 1).forEach((window) => {
-    if (window.state === "unknown") return;
-    counts.set(window.state, (counts.get(window.state) ?? 0) + 1);
-  });
-  return counts.size ? [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0] : "unclassified";
+function inactiveState(selected, options) {
+  const typicalSpeed = median(selected.filter((record) => record.smoothedSpeed !== null).map((record) => record.smoothedSpeed));
+  if (typicalSpeed === null) return "unclassified";
+  return typicalSpeed < options.lowMovementSpeedMps ? "low movement" : "slow transit";
 }
 
-function makeSection(records, windows, run, options, id, displayNumber) {
-  const startTimestamp = windows[run.start].startTimestamp;
-  const lastTimestamp = records.filter((record) => finite(record.timestamp)).at(-1)?.timestamp;
-  const endTimestamp = Math.min(windows[run.end].endTimestamp, lastTimestamp ?? windows[run.end].endTimestamp);
-  const selected = records.filter((record) => finite(record.timestamp)
-    && record.timestamp >= startTimestamp && record.timestamp < endTimestamp);
+// A leg ends where the course over ground turns by more than legTurnDegrees and stays turned,
+// which is what a tack, jibe or transition looks like on the track.
+function legBoundaries(selected, startTimestamp, endTimestamp, options) {
+  const points = selected.filter((record) => record.position);
+  const headings = [];
+  let ahead = 0;
+  points.forEach((point, position) => {
+    ahead = Math.max(ahead, position + 1);
+    while (ahead < points.length && points[ahead].timestamp < point.timestamp + options.legHeadingSpanSeconds) ahead += 1;
+    const target = points[ahead];
+    if (!target || target.timestamp - point.timestamp > options.maximumGpsGapSeconds) return;
+    if (distanceBetween(point.position, target.position) < options.minimumHeadingDistanceMetres) return;
+    headings.push({
+      // The heading describes the stretch ahead of the point, so it is dated to the middle of that stretch.
+      timestamp: (point.timestamp + target.timestamp) / 2,
+      heading: bearingBetween(point.position, target.position),
+    });
+  });
+  if (headings.length < 2) return [];
+
+  const turns = [];
+  let reference = headings[0].heading;
+  let turnStart = null;
+  headings.forEach((sample) => {
+    if (angleDifference(reference, sample.heading) <= options.legTurnDegrees) {
+      turnStart = null;
+      return;
+    }
+    turnStart ??= sample;
+    if (sample.timestamp - turnStart.timestamp < options.legTurnHoldSeconds) return;
+    turns.push(turnStart.timestamp);
+    reference = sample.heading;
+    turnStart = null;
+  });
+
+  const boundaries = [];
+  let legStart = startTimestamp;
+  turns.forEach((timestamp) => {
+    if (timestamp - legStart < options.minimumLegSeconds) return;
+    boundaries.push(timestamp);
+    legStart = timestamp;
+  });
+  if (boundaries.length && endTimestamp - boundaries.at(-1) < options.minimumLegSeconds) boundaries.pop();
+  return boundaries;
+}
+
+function buildLegs(records, selected, startTimestamp, endTimestamp, options) {
+  const edges = [startTimestamp, ...legBoundaries(selected, startTimestamp, endTimestamp, options), endTimestamp];
+  return edges.slice(1).map((legEnd, position) => {
+    const legStart = edges[position];
+    const legRecords = selected.filter((record) => record.timestamp >= legStart && record.timestamp < legEnd);
+    const positioned = legRecords.filter((record) => record.position);
+    const interval = intervalStats(records, legStart, legEnd, options.maximumIntervalSeconds);
+    const speeds = legRecords.filter((record) => finite(record.speed) && record.speed >= 0).map((record) => record.speed);
+    return {
+      number: position + 1,
+      startTimestamp: legStart,
+      endTimestamp: legEnd,
+      duration: legEnd - legStart,
+      startIndex: legRecords.length ? legRecords[0].index : null,
+      endIndex: legRecords.length ? legRecords.at(-1).index : null,
+      distance: interval.distance,
+      averageSpeed: interval.averageSpeed,
+      maximumSpeed: speeds.length ? Math.max(...speeds) : null,
+      heading: positioned.length >= 2 ? bearingBetween(positioned[0].position, positioned.at(-1).position) : null,
+    };
+  });
+}
+
+function makeSection(records, span, options, id, displayNumber) {
+  const startTimestamp = span.start;
+  const endTimestamp = span.end;
+  const selected = recordsBetween(records, startTimestamp, endTimestamp);
   const speeds = selected.filter((record) => finite(record.speed) && record.speed >= 0).map((record) => record.speed);
   const interval = intervalStats(records, startTimestamp, endTimestamp, options.maximumIntervalSeconds);
-  const heartRate = sectionHeartRate(records, startTimestamp, endTimestamp);
-  const firstIndex = selected.length ? selected[0].index : null;
-  const lastIndex = selected.length ? selected.at(-1).index : null;
-  const ranges = recordRanges(records, startTimestamp, endTimestamp, options.maximumIntervalSeconds);
+  const heartRate = sectionHeartRate(selected);
+  const ranges = recordRanges(selected, options.maximumIntervalSeconds);
   const direction = directionStats(records, ranges, options.maximumGpsGapSeconds);
-  const isActive = run.type === "active";
-  const state = isActive ? "active movement" : inactiveState(windows, run);
+  const isActive = span.type === "active";
+  const state = isActive ? "active movement" : inactiveState(selected, options);
+  const legs = isActive ? buildLegs(records, selected, startTimestamp, endTimestamp, options) : [];
   return {
     id,
-    type: run.type,
+    type: span.type,
     state,
     label: `${isActive ? "Active" : "Inactive"} section ${String(displayNumber).padStart(2, "0")}`,
-    startIndex: firstIndex,
-    endIndex: lastIndex,
+    startIndex: selected.length ? selected[0].index : null,
+    endIndex: selected.length ? selected.at(-1).index : null,
     ranges,
     startTimestamp,
     endTimestamp,
@@ -277,15 +348,18 @@ function makeSection(records, windows, run, options, id, displayNumber) {
     averageHeartRate: heartRate.average,
     heartRateTrend: heartRate.trend,
     gpsPointCount: selected.filter((record) => record.position).length,
+    legs,
+    medianLegDuration: median(legs.map((leg) => leg.duration)),
     confidence: isActive && interval.activeSeconds >= (endTimestamp - startTimestamp) * 0.8 ? "high" : "medium",
     evidence: isActive
       ? [
-        `${options.windowSeconds}-second median speed above ${(options.activeSpeedMps * 3.6).toFixed(1)} km/h`,
-        `${run.end - run.start + 1} consecutive active windows`,
+        `${options.smoothingSeconds}-second median speed above ${(options.activeSpeedMps * 3.6).toFixed(1)} km/h`,
+        `stops shorter than ${options.mergeGapSeconds} seconds bridged`,
+        `${legs.length} ${legs.length === 1 ? "leg" : "legs"} between turns`,
       ]
       : [
-        `${run.end - run.start + 1} non-active windows`,
-        state === "unclassified" ? "no stable speed state" : `${state} is the dominant state`,
+        `no riding stretch of ${options.minimumActiveSeconds} seconds or longer`,
+        state === "unclassified" ? "no usable speed samples" : `${state} is the typical state`,
       ],
   };
 }
@@ -297,25 +371,27 @@ export function sectionContainsIndex(section, index) {
 export function segmentTrack(records, suppliedOptions = {}) {
   const options = { ...DEFAULT_SEGMENTATION_OPTIONS, ...suppliedOptions };
   const normalizedRecords = normalizeTrackRecords(records);
-  const { firstTimestamp, windows } = buildMovementWindows(normalizedRecords, options);
-  const activeRuns = activeWindowRuns(windows, options);
-  const runs = completeWindowRuns(windows, activeRuns);
-  const sections = firstTimestamp === null
-    ? []
-    : runs.map((run, index) => makeSection(normalizedRecords, windows, run, options, index, index + 1));
+  const timed = normalizedRecords.filter((record) => finite(record.timestamp));
+  smoothSpeeds(timed, options.smoothingSeconds);
+  const spans = timed.length
+    ? timelineSpans(timed[0].timestamp, timed.at(-1).timestamp + 1, activeIntervals(timed, options))
+    : [];
+  const sections = spans.map((span, index) => makeSection(normalizedRecords, span, options, index, index + 1));
   const activeSections = sections.filter((section) => section.type === "active");
   const routeRuns = buildRouteRuns(normalizedRecords, options.maximumGpsGapSeconds);
   const activeDuration = activeSections.reduce((sum, section) => sum + section.activeDuration, 0);
   const activeDistance = activeSections.reduce((sum, section) => sum + section.distance, 0);
+  const legs = activeSections.flatMap((section) => section.legs);
   return {
     options,
     records: normalizedRecords,
-    windows,
     routeRuns,
     sections,
     activeSections,
     activeDuration,
     activeDistance,
     averageActiveSpeed: activeDuration ? activeDistance / activeDuration : null,
+    legCount: legs.length,
+    medianLegDuration: median(legs.map((leg) => leg.duration)),
   };
 }

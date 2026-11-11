@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "app": "node server.mjs"
+    "app": "node server.mjs",
+    "test": "node --test"
   }
 }

@@ -1,195 +1,240 @@
+// Synthetic documentation session. Nothing in this file comes from a recorded activity:
+// the track is produced by a small seeded simulation of a rider reaching back and forth off a beach.
 const FIT_EPOCH_MS = Date.UTC(1989, 11, 31);
 const SESSION_SECONDS = 90 * 60;
-const SAMPLE_SECONDS = 2;
 const START_TIME = Math.floor((Date.UTC(2025, 6, 18, 13, 30) - FIT_EPOCH_MS) / 1000);
-const EL_GOUNA = { latitude: 27.3976, longitude: 33.6842 };
-const ROUTE_NODES_METRES = [
-  { east: -600, north: -780 },
-  { east: -505, north: -738 },
-  { east: -365, north: -665 },
-  { east: -205, north: -570 },
-  { east: -30, north: -466 },
-  { east: 155, north: -385 },
-  { east: 325, north: -326 },
-  { east: 440, north: -300 },
-  { east: 454, north: -284 },
-  { east: 427, north: -270 },
-  { east: 355, north: -283 },
-  { east: 190, north: -326 },
-  { east: 5, north: -386 },
-  { east: -180, north: -446 },
-  { east: -345, north: -488 },
-  { east: -460, north: -500 },
-  { east: -479, north: -483 },
-  { east: -468, north: -455 },
-  { east: -395, north: -414 },
-  { east: -240, north: -337 },
-  { east: -65, north: -243 },
-  { east: 120, north: -155 },
-  { east: 305, north: -74 },
-  { east: 470, north: -12 },
-  { east: 570, north: 20 },
-  { east: 588, north: 39 },
-  { east: 587, north: 65 },
-  { east: 550, north: 80 },
-  { east: 395, north: 41 },
-  { east: 220, north: -12 },
-  { east: 35, north: -76 },
-  { east: -155, north: -125 },
-  { east: -340, north: -158 },
-  { east: -500, north: -170 },
-  { east: -520, north: -152 },
-  { east: -508, north: -120 },
-  { east: -435, north: -88 },
-  { east: -280, north: -22 },
-  { east: -100, north: 65 },
-  { east: 90, north: 154 },
-  { east: 280, north: 244 },
-  { east: 455, north: 325 },
-  { east: 580, north: 365 },
-  { east: 620, north: 370 },
-  { east: 638, north: 385 },
-  { east: 637, north: 411 },
-  { east: 600, north: 431 },
-  { east: 440, north: 402 },
-  { east: 270, north: 355 },
-  { east: 90, north: 300 },
-  { east: -100, north: 243 },
-  { east: -300, north: 205 },
-  { east: -460, north: 190 },
-  { east: -478, north: 208 },
-  { east: -470, north: 235 },
-  { east: -395, north: 272 },
-  { east: -240, north: 345 },
-  { east: -70, north: 430 },
-  { east: 110, north: 519 },
-  { east: 290, north: 605 },
-  { east: 465, north: 684 },
-  { east: 570, north: 724 },
-  { east: 600, north: 730 },
-  { east: 616, north: 747 },
-  { east: 612, north: 775 },
-  { east: 574, north: 797 },
-  { east: 415, north: 755 },
-  { east: 235, north: 693 },
-  { east: 45, north: 627 },
-  { east: -145, north: 560 },
-  { east: -310, north: 520 },
-  { east: -400, north: 510 },
-  { east: -417, north: 530 },
-  { east: -408, north: 557 },
-  { east: -330, north: 600 },
-  { east: -170, north: 673 },
-  { east: 10, north: 758 },
-  { east: 190, north: 848 },
-  { east: 365, north: 935 },
-  { east: 505, north: 1020 },
-  { east: 555, north: 1058 },
-  { east: 570, north: 1070 },
-  { east: 587, north: 1089 },
-  { east: 581, north: 1116 },
-  { east: 542, north: 1138 },
-  { east: 385, north: 1095 },
-  { east: 205, north: 1035 },
-  { east: 20, north: 970 },
-  { east: -160, north: 906 },
-  { east: -300, north: 856 },
-  { east: -350, north: 840 },
-  { east: -365, north: 861 },
-  { east: -354, north: 890 },
-  { east: -280, north: 936 },
-  { east: -120, north: 1012 },
-  { east: 55, north: 1104 },
-  { east: 230, north: 1200 },
-  { east: 395, north: 1298 },
-  { east: 520, north: 1381 },
-  { east: 560, north: 1410 },
-  { east: 578, north: 1429 },
-  { east: 570, north: 1457 },
-  { east: 530, north: 1482 },
-  { east: 375, north: 1435 },
-  { east: 200, north: 1360 },
-  { east: 25, north: 1295 },
-  { east: -145, north: 1227 },
-  { east: -250, north: 1195 },
-  { east: -270, north: 1190 },
-  { east: -283, north: 1213 },
-  { east: -266, north: 1243 },
-  { east: -194, north: 1290 },
-  { east: -35, north: 1372 },
-  { east: 135, north: 1468 },
-  { east: 305, north: 1560 },
-  { east: 468, north: 1641 },
-  { east: 580, north: 1682 },
-  { east: 610, north: 1690 },
-  { east: 625, north: 1676 },
-  { east: 618, north: 1650 },
-  { east: 580, north: 1612 },
-  { east: 475, north: 1560 },
-  { east: 355, north: 1497 },
-  { east: 260, north: 1450 },
-  { east: 230, north: 1422 },
-  { east: 186, north: 1360 },
-  { east: 125, north: 1286 },
-  { east: 55, north: 1215 },
-  { east: -18, north: 1144 },
-  { east: -93, north: 1073 },
-  { east: -130, north: 1020 },
-  { east: -111, north: 1000 },
-  { east: -55, north: 965 },
-  { east: 30, north: 914 },
-  { east: 125, north: 846 },
-  { east: 225, north: 767 },
-  { east: 325, north: 685 },
-  { east: 410, north: 618 },
-  { east: 450, north: 590 },
-  { east: 467, north: 572 },
-  { east: 462, north: 548 },
-  { east: 425, north: 524 },
-  { east: 315, north: 490 },
-  { east: 195, north: 449 },
-  { east: 70, north: 405 },
-  { east: -55, north: 367 },
-  { east: -110, north: 350 },
-  { east: -82, north: 327 },
-  { east: -24, north: 284 },
-  { east: 52, north: 226 },
-  { east: 132, north: 166 },
-  { east: 215, north: 105 },
-  { east: 300, north: 48 },
-  { east: 382, north: -2 },
-  { east: 450, north: -50 },
-  { east: 466, north: -66 },
-  { east: 464, north: -93 },
-  { east: 425, north: -117 },
-  { east: 305, north: -146 },
-  { east: 175, north: -179 },
-  { east: 40, north: -211 },
-  { east: -105, north: -237 },
-  { east: -230, north: -250 },
-  { east: -216, north: -273 },
-  { east: -160, north: -320 },
-  { east: -86, north: -367 },
-  { east: -4, north: -416 },
-  { east: 75, north: -466 },
-  { east: 140, north: -507 },
-  { east: 170, north: -520 },
-  { east: 150, north: -540 },
-  { east: 100, north: -563 },
-  { east: 28, north: -592 },
-  { east: -62, north: -624 },
-  { east: -165, north: -662 },
-  { east: -280, north: -706 },
-  { east: -410, north: -748 },
-  { east: -530, north: -775 },
-  { east: -600, north: -780 },
+const METRES_PER_DEGREE = 111320;
+const SEED = 20250718;
+
+// Where the gear lies on the beach at El Gouna. The shore runs along SHORE_BEARING with the water on its right.
+const GEAR_SPOT = { latitude: 27.41633, longitude: 33.67769 };
+const SHORE_BEARING = 338;
+const WATERLINE_METRES = 30;
+const PREVAILING_WIND = 330;
+
+// [seconds into the session, wind speed m/s, direction the wind comes from, gusts m/s]
+const WEATHER = [
+  [0, 8.9, 328, 11.3],
+  [900, 9.2, 331, 11.8],
+  [1800, 9.5, 334, 12.1],
+  [2700, 9.0, 330, 11.4],
+  [3600, 9.4, 327, 12.0],
+  [4500, 9.1, 332, 11.7],
+  [5400, 9.3, 329, 11.9],
 ];
 
-const ROUTE_SEGMENTS = ROUTE_NODES_METRES.slice(1).map((end, index) => {
-  const start = ROUTE_NODES_METRES[index];
-  return { start, end, length: Math.hypot(end.east - start.east, end.north - start.north) };
-});
-const ROUTE_LENGTH = ROUTE_SEGMENTS.reduce((total, segment) => total + segment.length, 0);
+// upwindTarget is how far upwind of the gear spot the rider tries to hold their line during that block.
+const PLAN = [
+  { type: "beach", seconds: 200 },
+  { type: "ride", seconds: 11 * 60, upwindTarget: 60 },
+  { type: "beach", seconds: 230 },
+  { type: "ride", seconds: 18 * 60, upwindTarget: 220 },
+  { type: "beach", seconds: 330 },
+  { type: "ride", seconds: 15 * 60, upwindTarget: -40 },
+  { type: "beach", seconds: 280 },
+  { type: "ride", seconds: 19 * 60, upwindTarget: 140 },
+  { type: "beach" },
+];
+
+const HEART_RATE = { standing: 99, walking: 110, riding: 132, swimming: 142, sessionDrift: 12 };
+const HEART_RATE_ZONE_LIMITS = [111, 130, 148, 167];
+
+function createRandom(seed) {
+  let state = seed >>> 0;
+  const uniform = () => {
+    state = (state + 0x6D2B79F5) >>> 0;
+    let value = state;
+    value = Math.imul(value ^ (value >>> 15), value | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+  };
+  return {
+    uniform,
+    between: (low, high) => low + (high - low) * uniform(),
+    normal: () => Math.sqrt(-2 * Math.log(1 - uniform())) * Math.cos(2 * Math.PI * uniform()),
+  };
+}
+
+function clamp(value, low, high) {
+  return Math.max(low, Math.min(high, value));
+}
+
+function unitVector(bearing) {
+  const angle = bearing * Math.PI / 180;
+  return { east: Math.sin(angle), north: Math.cos(angle) };
+}
+
+function windDirectionAt(second) {
+  const upper = WEATHER.findIndex(([offset]) => offset >= second);
+  if (upper <= 0) return WEATHER[upper === 0 ? 0 : WEATHER.length - 1][2];
+  const [lowerOffset, , lowerDirection] = WEATHER[upper - 1];
+  const [upperOffset, , upperDirection] = WEATHER[upper];
+  return lowerDirection + (upperDirection - lowerDirection) * (second - lowerOffset) / (upperOffset - lowerOffset);
+}
+
+// Board speed by angle off the wind: slower when pointing upwind, faster on a broad reach.
+function boardSpeed(offWind) {
+  return offWind <= 90 ? 7.5 - (90 - offWind) * 0.05 : 7.5 + Math.min(offWind - 90, 30) * 0.035;
+}
+
+function simulateSession() {
+  const random = createRandom(SEED);
+  const offshore = unitVector(SHORE_BEARING + 90);
+  const upwind = unitVector(PREVAILING_WIND);
+  const rider = { second: 0, east: 0, north: 0, speed: 0, heartRate: 92, distance: 0 };
+  const noise = { gust: 0, course: 0, gpsEast: 0, gpsNorth: 0, heartRate: 0 };
+  const samples = [];
+
+  const finished = () => rider.second > SESSION_SECONDS;
+  const offshoreDistance = () => rider.east * offshore.east + rider.north * offshore.north;
+  const upwindDistance = () => rider.east * upwind.east + rider.north * upwind.north;
+  const bearingTo = (point) => Math.atan2(point.east - rider.east, point.north - rider.north) * 180 / Math.PI;
+  const distanceTo = (point) => Math.hypot(point.east - rider.east, point.north - rider.north);
+
+  // Records the current second, then moves the rider on by one second.
+  function tick(targetSpeed, heading, effort, { acceleration = 1, braking = 1.8 } = {}) {
+    if (finished()) return;
+    noise.gpsEast = 0.9 * noise.gpsEast + 0.35 * random.normal();
+    noise.gpsNorth = 0.9 * noise.gpsNorth + 0.35 * random.normal();
+    noise.heartRate = 0.85 * noise.heartRate + 0.7 * random.normal();
+    samples.push({
+      second: rider.second,
+      east: rider.east + noise.gpsEast,
+      north: rider.north + noise.gpsNorth,
+      speed: Math.max(0, rider.speed + 0.12 * random.normal()),
+      heartRate: Math.round(rider.heartRate + noise.heartRate),
+      distance: rider.distance,
+    });
+    rider.speed = Math.max(0, rider.speed + clamp(targetSpeed - rider.speed, -braking, acceleration));
+    const direction = unitVector(heading);
+    rider.east += rider.speed * direction.east;
+    rider.north += rider.speed * direction.north;
+    rider.distance += rider.speed;
+    const target = effort + HEART_RATE.sessionDrift * rider.second / SESSION_SECONDS;
+    rider.heartRate += (target - rider.heartRate) / (target > rider.heartRate ? 28 : 75);
+    rider.second += 1;
+  }
+
+  function stand(until) {
+    let heading = random.between(0, 360);
+    while (!finished() && rider.second < until) {
+      heading += 40 * random.normal();
+      tick(random.uniform() < 0.9 ? 0.12 : 0.6, heading, HEART_RATE.standing, { acceleration: 0.4 });
+    }
+  }
+
+  function walkTo(point) {
+    while (!finished() && distanceTo(point) > 4) {
+      tick(1.15 + 0.1 * random.normal(), bearingTo(point) + 6 * random.normal(), HEART_RATE.walking, { acceleration: 0.5 });
+    }
+  }
+
+  function beach(seconds) {
+    const until = seconds === undefined ? Infinity : rider.second + seconds;
+    stand(Math.min(until, rider.second + random.between(18, 32)));
+    walkTo({ east: random.between(-3, 3), north: random.between(-3, 3) });
+    stand(until);
+  }
+
+  function rideEffort(offWind) {
+    return Math.max(122, HEART_RATE.riding + 2.5 * (rider.speed - 6.5) + (offWind < 80 ? 5 : 0));
+  }
+
+  // A fall: the rider drifts slowly downwind until the kite is relaunched and the board is back on.
+  function crash() {
+    const until = rider.second + (random.uniform() < 0.62 ? random.between(7, 19) : random.between(32, 85));
+    while (!finished() && rider.second < until) {
+      noise.course = 0.93 * noise.course + 1.1 * random.normal();
+      const downwind = windDirectionAt(rider.second) + 180;
+      tick(0.35 + 0.25 * random.uniform(), downwind + 4 * noise.course, HEART_RATE.swimming, { braking: 4 });
+    }
+  }
+
+  // A transition: brake on the old course, swing the board through downwind, then accelerate away.
+  // Most are slow sliding turns; some are carved and keep more speed through a wider arc.
+  function turn(leg, next) {
+    const carved = random.uniform() < 0.3;
+    const slowest = carved ? random.between(3.2, 4.5) : random.between(1.6, 2.6);
+    const brakeSeconds = Math.round(random.between(1, 3));
+    for (let step = 0; step < brakeSeconds; step += 1) {
+      tick(slowest + 1, windDirectionAt(rider.second) + leg.tack * (leg.offWind + 8), rideEffort(leg.offWind), { braking: 2.2 });
+    }
+    const swingSeconds = Math.round(carved ? random.between(4, 6) : random.between(3, 5));
+    const sweep = 360 - leg.offWind - next.offWind;
+    for (let step = 1; step <= swingSeconds; step += 1) {
+      const progress = step / swingSeconds;
+      const offWind = leg.offWind + sweep * progress * progress * (3 - 2 * progress);
+      tick(slowest + 0.3 * random.normal(), windDirectionAt(rider.second) + leg.tack * offWind, rideEffort(90) + 3, { braking: 2.2 });
+    }
+  }
+
+  // tack 1 heads out to sea, tack -1 heads back towards the beach.
+  function planLeg(tack, phase, end) {
+    const upwindTarget = rider.second > end - 180 ? 20 : phase.upwindTarget;
+    const outerTurn = random.uniform() < 0.15 ? random.between(150, 300) : random.between(360, 620);
+    return {
+      tack,
+      offWind: clamp(88 + (upwindDistance() - upwindTarget) / 14 + 4 * random.normal(), 64, 112),
+      // Degrees per second the rider gradually heads up or bears away, which bends the leg slightly.
+      drift: 0.07 * random.normal(),
+      turnAt: tack === 1 ? outerTurn : WATERLINE_METRES + random.between(35, 190),
+    };
+  }
+
+  // Sails one leg. Returns true when the rider has come back in and stopped at the beach.
+  function sail(leg, end) {
+    const started = rider.second;
+    const landing = { east: offshore.east * WATERLINE_METRES, north: offshore.north * WATERLINE_METRES };
+    while (!finished()) {
+      const returning = rider.second >= end;
+      const fromShore = offshoreDistance();
+      const wind = windDirectionAt(rider.second);
+      // Angle off the wind that points straight at the landing spot on the inbound tack.
+      const needed = ((wind - bearingTo(landing)) % 360 + 360) % 360;
+      const canFetchBeach = needed <= 125 || needed > 250;
+      let offWind = leg.offWind + clamp(leg.drift * (rider.second - started), -10, 10);
+      let speedLimit = Infinity;
+      if (leg.tack === 1) {
+        const turnForHome = returning && needed >= 70 && needed <= 120 && rider.second - started > 8;
+        if (fromShore >= leg.turnAt || turnForHome) return false;
+      } else if (returning && canFetchBeach) {
+        if (fromShore <= WATERLINE_METRES + 3) return true;
+        offWind = needed > 250 ? 64 : clamp(needed, 64, 125);
+        speedLimit = fromShore < WATERLINE_METRES + 25 ? 2 : fromShore < WATERLINE_METRES + 60 ? 4.5 : Infinity;
+      } else if (fromShore <= leg.turnAt) {
+        return false;
+      }
+      noise.course = 0.93 * noise.course + 1.1 * random.normal();
+      noise.gust = 0.97 * noise.gust + 0.02 * random.normal();
+      const course = offWind + noise.course;
+      const fatigue = 1 - 0.06 * rider.second / SESSION_SECONDS;
+      const speed = boardSpeed(course) * (1 + clamp(noise.gust, -0.2, 0.2)) * fatigue;
+      tick(Math.min(speed, speedLimit), wind + leg.tack * course, rideEffort(course));
+      if (speedLimit === Infinity && random.uniform() < 1 / 1100) crash();
+    }
+    return true;
+  }
+
+  function ride(phase) {
+    const end = rider.second + phase.seconds;
+    // Carry the board into the shallows before starting.
+    while (!finished() && offshoreDistance() < WATERLINE_METRES + 8) {
+      tick(1.05 + 0.1 * random.normal(), SHORE_BEARING + 90 + 8 * random.normal(), HEART_RATE.walking, { acceleration: 0.5 });
+    }
+    stand(rider.second + random.between(6, 14));
+    let leg = planLeg(1, phase, end);
+    while (!finished()) {
+      if (sail(leg, end)) return;
+      const next = planLeg(-leg.tack, phase, end);
+      if (random.uniform() < 0.07) crash();
+      else turn(leg, next);
+      leg = next;
+    }
+  }
+
+  PLAN.forEach((phase) => (phase.type === "ride" ? ride(phase) : beach(phase.seconds)));
+  return samples;
+}
 
 function demoMessage(globalNumber, name, fields, units = {}) {
   return {
@@ -208,39 +253,6 @@ function demoMessage(globalNumber, name, fields, units = {}) {
   };
 }
 
-function routePosition(distance) {
-  let remaining = distance % ROUTE_LENGTH;
-  let segment = ROUTE_SEGMENTS.at(-1);
-  for (const candidate of ROUTE_SEGMENTS) {
-    if (remaining <= candidate.length) {
-      segment = candidate;
-      break;
-    }
-    remaining -= candidate.length;
-  }
-  const ratio = segment.length ? remaining / segment.length : 0;
-  const east = segment.start.east + (segment.end.east - segment.start.east) * ratio;
-  const north = segment.start.north + (segment.end.north - segment.start.north) * ratio;
-  return {
-    latitude: EL_GOUNA.latitude + north / 111320,
-    longitude: EL_GOUNA.longitude + east / (111320 * Math.cos(EL_GOUNA.latitude * Math.PI / 180)),
-  };
-}
-
-function isActive(second) {
-  return (second >= 180 && second < 2040) || (second >= 2340 && second < 5220);
-}
-
-function speedAt(second, active) {
-  if (!active) return 0.95 + 0.22 * Math.sin(second / 23);
-  return 6.85 + 0.88 * Math.sin(second / 47) + 0.38 * Math.sin(second / 9);
-}
-
-function heartRateAt(second, active) {
-  if (!active) return Math.round(97 + 4 * Math.sin(second / 29));
-  return Math.round(138 + 13 * Math.sin(second / 71) + 4 * Math.sin(second / 13) + second / 460);
-}
-
 function messageTypes(messages) {
   const counts = new Map();
   messages.forEach((message) => {
@@ -253,50 +265,34 @@ function messageTypes(messages) {
 }
 
 export function createDemoActivity() {
-  const records = [];
-  let distance = 0;
-  let totalHeartRate = 0;
-  let maxHeartRate = 0;
-  let minHeartRate = Infinity;
-  let maxSpeed = 0;
+  const samples = simulateSession();
+  const longitudeScale = METRES_PER_DEGREE * Math.cos(GEAR_SPOT.latitude * Math.PI / 180);
+  const records = samples.map((sample) => demoMessage(20, "record", {
+    timestamp: START_TIME + sample.second,
+    position_lat: GEAR_SPOT.latitude + sample.north / METRES_PER_DEGREE,
+    position_long: GEAR_SPOT.longitude + sample.east / longitudeScale,
+    heart_rate: sample.heartRate,
+    distance: sample.distance,
+    enhanced_speed: sample.speed,
+    gps_accuracy: 3 + (sample.second % 4) * 0.35,
+    calories: Math.round(1010 * sample.second / SESSION_SECONDS),
+    temperature: 29,
+  }, {
+    distance: "m",
+    enhanced_speed: "m/s",
+    gps_accuracy: "m",
+    temperature: "C",
+  }));
 
-  for (let second = 0; second <= SESSION_SECONDS; second += SAMPLE_SECONDS) {
-    const active = isActive(second);
-    const speed = speedAt(second, active);
-    const heartRate = heartRateAt(second, active);
-    const position = routePosition(distance);
-    records.push(demoMessage(20, "record", {
-      timestamp: START_TIME + second,
-      position_lat: position.latitude,
-      position_long: position.longitude,
-      heart_rate: heartRate,
-      distance,
-      enhanced_speed: speed,
-      gps_accuracy: 3 + (second / SAMPLE_SECONDS % 4) * 0.35,
-      calories: Math.round(1010 * second / SESSION_SECONDS),
-      temperature: 29,
-    }, {
-      distance: "m",
-      enhanced_speed: "m/s",
-      gps_accuracy: "m",
-      temperature: "C",
-    }));
-    totalHeartRate += heartRate;
-    maxHeartRate = Math.max(maxHeartRate, heartRate);
-    minHeartRate = Math.min(minHeartRate, heartRate);
-    maxSpeed = Math.max(maxSpeed, speed);
-    if (second < SESSION_SECONDS) distance += speed * SAMPLE_SECONDS;
-  }
+  const heartRates = samples.map((sample) => sample.heartRate);
+  const distance = samples.at(-1).distance;
+  const timeInZone = [0, 0, 0, 0, 0];
+  heartRates.forEach((heartRate) => {
+    const zone = HEART_RATE_ZONE_LIMITS.findIndex((limit) => heartRate < limit);
+    timeInZone[zone < 0 ? HEART_RATE_ZONE_LIMITS.length : zone] += 1;
+  });
 
-  const weather = [
-    [0, 8.9, 328, 11.3],
-    [900, 9.2, 331, 11.8],
-    [1800, 9.5, 334, 12.1],
-    [2700, 9.0, 330, 11.4],
-    [3600, 9.4, 327, 12.0],
-    [4500, 9.1, 332, 11.7],
-    [5400, 9.3, 329, 11.9],
-  ].map(([offset, windSpeed, windDirection, windGusts]) => demoMessage(128, "weather_conditions", {
+  const weather = WEATHER.map(([offset, windSpeed, windDirection, windGusts]) => demoMessage(128, "weather_conditions", {
     timestamp: START_TIME + offset,
     observed_at_time: START_TIME + offset,
     weather_location: "El Gouna, Egypt (synthetic)",
@@ -324,13 +320,13 @@ export function createDemoActivity() {
     total_distance: distance,
     total_calories: 1010,
     avg_speed: distance / SESSION_SECONDS,
-    max_speed: maxSpeed,
-    avg_heart_rate: totalHeartRate / records.length,
-    max_heart_rate: maxHeartRate,
-    min_heart_rate: minHeartRate,
+    max_speed: Math.max(...samples.map((sample) => sample.speed)),
+    avg_heart_rate: heartRates.reduce((total, heartRate) => total + heartRate, 0) / heartRates.length,
+    max_heart_rate: Math.max(...heartRates),
+    min_heart_rate: Math.min(...heartRates),
     total_training_effect: 3.8,
     training_stress_score: 101.2,
-    time_in_hr_zone: [540, 1200, 1980, 1320, 360],
+    time_in_hr_zone: timeInZone,
     recovery_time: 46800,
     peak_epoc: 109.5,
     carbs: 78,
