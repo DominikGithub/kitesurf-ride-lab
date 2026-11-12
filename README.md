@@ -18,6 +18,17 @@ Highligthed session events and wind data annotation.
 
 Analyze sensor data linked to every geographic location on the map at any point in time.
 
+### Track & water
+
+![Track & water page showing ground gained upwind and where the stops happened](docs/track-water-demo.png)
+
+Shows where things happen on the water, from the GPS track.
+
+- **Holding ground:** the track and a chart of metres upwind of the launch, both turned so the wind comes from the top. Needs a wind direction.
+- **Launch against landing:** how far downwind of the launch you came back in.
+- **Stops:** each stop on the map, drawn at the last GPS fix before it, with a note when most of them happen at one end of your run.
+- **Speed:** the same map with riding stretches coloured by speed.
+
 ### Ride segments
 
 ![Ride segments](docs/ride-segments-demo.png)

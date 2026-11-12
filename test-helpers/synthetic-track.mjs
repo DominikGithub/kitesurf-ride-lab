@@ -2,20 +2,20 @@
 export const START = 1_000_000;
 const METRES_PER_DEGREE = 111320;
 
-// phases: [{ seconds, speed (m/s), heading (degrees) }], sampled once per second from a made-up origin.
+// phases: [{ seconds, speed (m/s), heading (degrees), gps }], sampled once per second from a made-up origin.
+// gps: false leaves the position out, the way a watch under water records speed but no fix.
 export function syntheticTrack(phases) {
   const records = [];
   let north = 0;
   let east = 0;
   let second = 0;
-  phases.forEach(({ seconds, speed, heading = 0 }) => {
+  phases.forEach(({ seconds, speed, heading = 0, gps = true }) => {
     for (let step = 0; step < seconds; step += 1) {
       records.push({
         fields: {
           timestamp: START + second,
           enhanced_speed: speed,
-          position_lat: north / METRES_PER_DEGREE,
-          position_long: east / METRES_PER_DEGREE,
+          ...(gps ? { position_lat: north / METRES_PER_DEGREE, position_long: east / METRES_PER_DEGREE } : {}),
         },
       });
       north += speed * Math.cos(heading * Math.PI / 180);

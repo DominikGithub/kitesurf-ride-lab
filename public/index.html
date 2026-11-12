@@ -24,7 +24,7 @@
         <nav class="nav-list" aria-label="Workspace pages">
            <a class="nav-item active" href="#overview" data-page="overview"><span class="nav-index">01</span>Overview</a>
            <a class="nav-item" href="#speed-effort" data-page="speed-effort"><span class="nav-index">02</span>Session overview</a>
-           <span class="nav-item disabled"><span class="nav-index">03</span>Track &amp; water<small>soon</small></span>
+           <a class="nav-item" href="#track-water" data-page="track-water"><span class="nav-index">03</span>Track &amp; water</a>
            <a class="nav-item" href="#ride-segments" data-page="ride-segments"><span class="nav-index">04</span>Ride segments</a>
            <a class="nav-item" href="#coaching" data-page="coaching"><span class="nav-index">05</span>Coaching &amp; Growth</a>
         </nav>
@@ -450,6 +450,95 @@
               <section class="coaching-panel panel">
                 <div class="panel-heading"><div><p class="panel-kicker">Personal bests</p><h3>Best efforts in this session</h3></div></div>
                 <div class="segments-stat-grid coaching-stat-grid-5" id="coachingBestStats"></div>
+              </section>
+            </div>
+          </div>
+        </section>
+
+        <section class="coaching-page track-water-page hidden" id="trackWaterPage" aria-live="polite">
+          <div class="analysis-hero">
+            <div>
+              <p class="section-number">Ride lab / 03</p>
+              <h1>Read the <em>water.</em></h1>
+              <p class="intro-copy">Where you gained and lost ground against the wind, where you came back in, where the stops happened, and where you were fast.</p>
+            </div>
+            <div class="analysis-instruction panel">
+              <span class="analysis-instruction-number">01</span>
+              <div><strong>Up is upwind</strong><p>The first two plots are turned so the wind comes from the top. The map below keeps north at the top.</p></div>
+            </div>
+          </div>
+
+          <section class="analysis-empty panel" id="trackWaterEmpty">
+            <p class="empty-kicker">Track &amp; water needs a ride</p>
+            <h2>Load a session to see<br /><span>where it happened.</span></h2>
+            <p>Ground gained upwind, launch against landing, and where stops cluster are worked out in the browser from the GPS track. The FIT stays local.</p>
+            <button class="button button-primary" id="trackWaterLoadButton" type="button">Choose FIT file <span class="button-icon">+</span></button>
+          </section>
+
+          <div class="coaching-body hidden" id="trackWaterBody">
+            <div class="analysis-session panel">
+              <div>
+                <p class="panel-kicker">Session in focus</p>
+                <h2 id="trackWaterActivityTitle">Kite-surf session</h2>
+                <p id="trackWaterActivityDate">Date not available</p>
+              </div>
+              <div class="analysis-session-tag"><span class="pulse-dot"></span>from gps and wind</div>
+            </div>
+
+            <section class="analysis-empty panel hidden" id="trackWaterUnavailable">
+              <p class="empty-kicker">Nothing to place yet</p>
+              <h2>No riding with a GPS track<br /><span>in this session.</span></h2>
+              <p>This page needs at least one stretch of sustained riding speed and GPS positions to go with it.</p>
+            </section>
+
+            <div class="coaching-sections" id="trackWaterSections">
+              <section class="coaching-panel panel">
+                <div class="panel-heading"><div><p class="panel-kicker">Holding ground</p><h3>Position upwind of the launch</h3></div><span class="chart-unit" id="trackWaterWindSource"></span></div>
+                <p class="coaching-copy" id="trackWaterUpwindCopy"></p>
+                <div class="segments-stat-grid" id="trackWaterUpwindStats"></div>
+                <div class="track-water-plots" id="trackWaterPlots">
+                  <div class="track-water-plot">
+                    <p class="track-water-plot-title">Track with the wind from the top</p>
+                    <div class="track-water-plot-wrap track-water-plot-square"><canvas id="trackWaterWindPlot" aria-label="GPS track turned so the wind comes from the top"></canvas></div>
+                    <div class="coaching-legend"><span><i class="track-water-line is-riding"></i>riding</span><span><i class="track-water-line is-idle"></i>not riding</span><span><i class="map-marker-dot start"></i>launch</span><span><i class="map-marker-dot end"></i>landing</span></div>
+                  </div>
+                  <div class="track-water-plot">
+                    <p class="track-water-plot-title">Metres upwind of the launch over the session</p>
+                    <div class="track-water-plot-wrap" id="trackWaterChartWrap">
+                      <canvas id="trackWaterUpwindChart" aria-label="Position upwind of the launch over the session"></canvas>
+                      <div class="coaching-tooltip hidden" id="trackWaterChartTooltip" role="status"></div>
+                    </div>
+                    <div class="coaching-legend"><span><i class="track-water-line is-riding"></i>riding</span><span><i class="track-water-line is-idle"></i>not riding</span><span><i class="coaching-swatch is-break"></i>breaks and time ashore</span></div>
+                  </div>
+                </div>
+                <details class="coaching-details" id="trackWaterSectionDetails">
+                  <summary>Show ground gained in each ride section</summary>
+                  <div class="coaching-table-scroll">
+                    <table class="coaching-table">
+                      <thead><tr><th>Ride section</th><th class="is-number">Started at</th><th class="is-number">Ended at</th><th class="is-number">Ground gained</th></tr></thead>
+                      <tbody id="trackWaterSectionBody"></tbody>
+                    </table>
+                  </div>
+                </details>
+              </section>
+
+              <section class="coaching-panel panel">
+                <div class="panel-heading">
+                  <div><p class="panel-kicker">On the spot</p><h3 id="trackWaterMapTitle">Where the stops happened</h3></div>
+                  <div class="track-water-toggle" role="group" aria-label="What the map shows"><button type="button" data-track-water-mode="stops" aria-pressed="true">Stops</button><button type="button" data-track-water-mode="speed" aria-pressed="false">Speed</button></div>
+                </div>
+                <p class="coaching-copy" id="trackWaterMapCopy"></p>
+                <div class="coaching-legend" id="trackWaterMapLegend"></div>
+                <div class="segments-map-wrap track-water-map-wrap" id="trackWaterMapWrap"><div class="map-tiles" id="trackWaterMapTiles" aria-hidden="true"></div><canvas id="trackWaterMapCanvas" aria-label="Map of the track with stops or riding speed"></canvas><div class="map-zoom-controls" aria-label="Track map controls"><button type="button" data-map-zoom="in" data-map-zoom-target="track-water" aria-label="Zoom in" title="Zoom in">+</button><button type="button" data-map-zoom="out" data-map-zoom-target="track-water" aria-label="Zoom out" title="Zoom out">-</button><button type="button" data-map-zoom="fit" data-map-zoom-target="track-water" aria-label="Fit map to track" title="Fit track">fit</button></div><div class="map-attribution">© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap contributors</a></div><div class="coaching-tooltip hidden" id="trackWaterMapTooltip" role="status"></div></div>
+                <details class="coaching-details">
+                  <summary>Show every stop as a table</summary>
+                  <div class="coaching-table-scroll">
+                    <table class="coaching-table">
+                      <thead><tr><th>Time</th><th>Happened</th><th>Where on the run</th><th class="is-number">Riding again after</th></tr></thead>
+                      <tbody id="trackWaterStopBody"></tbody>
+                    </table>
+                  </div>
+                </details>
               </section>
             </div>
           </div>

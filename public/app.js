@@ -2,6 +2,7 @@ import { dateFromFit, decodeFit, getField } from "./fit-decoder.js";
 import { analyzeCoaching } from "./coaching.js";
 import { createDemoActivity } from "./demo-session.js";
 import { sectionContainsIndex, segmentTrack } from "./track-segmentation.js";
+import { analyzeTrackWater } from "./track-water.js";
 import { calculateWindCoaching, resolveWindAnnotation, summarizeAnnotatedWind } from "./wind-annotation.js";
 
 const $ = (selector) => document.querySelector(selector);
@@ -37,6 +38,13 @@ const coachingPage = $("#coachingPage");
 const coachingEmpty = $("#coachingEmpty");
 const coachingBody = $("#coachingBody");
 const coachingTurnCanvas = $("#coachingTurnChart");
+const trackWaterPage = $("#trackWaterPage");
+const trackWaterEmpty = $("#trackWaterEmpty");
+const trackWaterBody = $("#trackWaterBody");
+const trackWaterWindCanvas = $("#trackWaterWindPlot");
+const trackWaterChartCanvas = $("#trackWaterUpwindChart");
+const trackWaterMapCanvas = $("#trackWaterMapCanvas");
+const trackWaterMapTiles = $("#trackWaterMapTiles");
 
 const OVERVIEW_POINT_LIMIT = 720;
 const MAP_POINT_LIMIT = 720;
@@ -50,6 +58,8 @@ let analysisRenderState = { speed: null, heart: null, wind: null, map: null };
 let selectedSegmentIndex = null;
 let segmentRenderState = { map: null };
 let coachingRenderState = { marks: [], hoveredTurn: null, coaching: null };
+const emptyTrackWaterState = (mode = "stops") => ({ mode, analysis: null, chart: null, hoveredPoint: null, hoveredEvent: null, hoveredMapPoint: null, mapMarks: [], mapPoints: [] });
+let trackWaterRenderState = emptyTrackWaterState();
 let windAnnotationRequest = 0;
 let analysisMapFocus = null;
 const mapLayoutCache = new WeakMap();
@@ -819,6 +829,7 @@ function drawSegmentedMap(canvas, segmentation, options = {}) {
 function mapContainerForTarget(target) {
   if (target === "analysis") return analysisMapTiles;
   if (target === "segments") return segmentsMapTiles;
+  if (target === "track-water") return trackWaterMapTiles;
   return mapTiles;
 }
 
@@ -1260,6 +1271,7 @@ function formatSeconds(seconds) {
 
 function formatSignedDistance(metres) {
   if (typeof metres !== "number" || !Number.isFinite(metres)) return "—";
+  if (Math.abs(metres) < 0.5) return "0 m";
   return `${metres >= 0 ? "+" : "−"}${formatDistance(Math.abs(metres))}`;
 }
 
@@ -1626,9 +1638,573 @@ function bindCoachingInteractions() {
   });
 }
 
+const TRACK_WATER_RIDING_COLOR = "#2a78d6";
+const TRACK_WATER_IDLE_COLOR = "#9aa5a2";
+const TRACK_WATER_STOP_COLOR = "#d03b3b";
+// One hue from light (slow) to dark (fast), chosen to stand out against the blue of the water tiles.
+const TRACK_WATER_SPEED_COLORS = ["#fde2a6", "#f8b84e", "#ec8a2a", "#c35a17", "#7f340b"];
+const TRACK_WATER_CONTEXT_LABELS = { turn: "In a turn", leg: "Mid-leg", unclear: "Unclear" };
+
+function trackWaterFor(summary) {
+  const coaching = coachingFor(summary);
+  if (!summary.trackWater || summary.trackWaterCoaching !== coaching) {
+    summary.trackWater = analyzeTrackWater(summary.segmentation, coaching, { recordWind: summary.coachingWind });
+    summary.trackWaterCoaching = coaching;
+  }
+  return summary.trackWater;
+}
+
+function prepareCanvas(canvas, minimumWidth = 200, minimumHeight = 160) {
+  const wrapper = canvas.parentElement;
+  const width = Math.max(minimumWidth, Math.floor(wrapper.clientWidth));
+  const height = Math.max(minimumHeight, Math.floor(wrapper.clientHeight));
+  const ratio = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = width * ratio;
+  canvas.height = height * ratio;
+  const context = canvas.getContext("2d");
+  context.setTransform(ratio, 0, 0, ratio, 0, 0);
+  context.clearRect(0, 0, width, height);
+  return { context, width, height };
+}
+
+// A round step (1, 2 or 5 times a power of ten) that gives roughly the wanted number of ticks.
+function niceStep(span, wantedTicks) {
+  const raw = Math.max(span, 1e-9) / wantedTicks;
+  const magnitude = 10 ** Math.floor(Math.log10(raw));
+  const normalized = raw / magnitude;
+  return (normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10) * magnitude;
+}
+
+function placeTooltip(tooltip, wrapper, x, y) {
+  const left = clamp(x + 14, 0, Math.max(0, wrapper.clientWidth - tooltip.offsetWidth));
+  const above = y - tooltip.offsetHeight - 12;
+  tooltip.style.left = `${left}px`;
+  tooltip.style.top = `${above >= 0 ? above : Math.min(y + 14, Math.max(0, wrapper.clientHeight - tooltip.offsetHeight))}px`;
+}
+
+// Strokes the stretches of the track whose end point matches, never joining across a GPS gap.
+function strokeTrack(context, points, projected, matches, color, width) {
+  context.strokeStyle = color;
+  context.lineWidth = width;
+  context.lineJoin = "round";
+  context.lineCap = "round";
+  context.beginPath();
+  for (let index = 1; index < points.length; index += 1) {
+    if (points[index].run !== points[index - 1].run || !matches(points[index])) continue;
+    context.moveTo(projected[index - 1].x, projected[index - 1].y);
+    context.lineTo(projected[index].x, projected[index].y);
+  }
+  context.stroke();
+}
+
+function drawDot(context, point, radius, fill, ring = "#fbfcf8") {
+  context.fillStyle = ring;
+  context.beginPath();
+  context.arc(point.x, point.y, radius + 2, 0, Math.PI * 2);
+  context.fill();
+  context.fillStyle = fill;
+  context.beginPath();
+  context.arc(point.x, point.y, radius, 0, Math.PI * 2);
+  context.fill();
+}
+
+function drawCross(context, x, y, hovered) {
+  const stroke = (color, lineWidth, size) => {
+    context.strokeStyle = color;
+    context.lineWidth = lineWidth;
+    context.lineCap = "round";
+    context.beginPath();
+    context.moveTo(x - size, y - size);
+    context.lineTo(x + size, y + size);
+    context.moveTo(x + size, y - size);
+    context.lineTo(x - size, y + size);
+    context.stroke();
+  };
+  stroke("#fbfcf8", 6.5, 5.5);
+  stroke(TRACK_WATER_STOP_COLOR, 2.5, 5);
+  if (hovered) {
+    context.strokeStyle = "#17252a";
+    context.lineWidth = 1.5;
+    context.beginPath();
+    context.arc(x, y, 11, 0, Math.PI * 2);
+    context.stroke();
+  }
+}
+
+function drawHoverMarker(context, point) {
+  context.fillStyle = "rgba(251, 252, 248, .95)";
+  context.strokeStyle = "#17252a";
+  context.lineWidth = 2;
+  context.beginPath();
+  context.arc(point.x, point.y, 6, 0, Math.PI * 2);
+  context.fill();
+  context.stroke();
+}
+
+function drawWindUpPlot(analysis) {
+  const { context, width, height } = prepareCanvas(trackWaterWindCanvas);
+  const { points } = analysis;
+  const padding = { top: 40, right: 18, bottom: 34, left: 18 };
+  const range = (pick) => points.reduce((result, point) => [Math.min(result[0], pick(point)), Math.max(result[1], pick(point))], [Infinity, -Infinity]);
+  const [minCross, maxCross] = range((point) => point.crosswind);
+  const [minUp, maxUp] = range((point) => point.upwind);
+  const scale = Math.min(
+    (width - padding.left - padding.right) / Math.max(maxCross - minCross, 20),
+    (height - padding.top - padding.bottom) / Math.max(maxUp - minUp, 20),
+  );
+  const centreX = padding.left + (width - padding.left - padding.right) / 2;
+  const centreY = padding.top + (height - padding.top - padding.bottom) / 2;
+  const project = (point) => ({
+    x: centreX + (point.crosswind - (minCross + maxCross) / 2) * scale,
+    y: centreY - (point.upwind - (minUp + maxUp) / 2) * scale,
+  });
+  const projected = points.map(project);
+
+  // The level of the launch: above it is ground gained, below it is ground lost.
+  const launchPoint = project(analysis.launch);
+  context.strokeStyle = "rgba(55, 77, 80, 0.3)";
+  context.lineWidth = 1;
+  context.setLineDash([4, 4]);
+  context.beginPath();
+  context.moveTo(padding.left, launchPoint.y);
+  context.lineTo(width - padding.right, launchPoint.y);
+  context.stroke();
+  context.setLineDash([]);
+  context.fillStyle = "#9ba5a3";
+  context.font = "9px ui-monospace, SFMono-Regular, Menlo, monospace";
+  context.textBaseline = "bottom";
+  context.textAlign = launchPoint.x > width / 2 ? "left" : "right";
+  context.fillText("launch level", launchPoint.x > width / 2 ? padding.left : width - padding.right, launchPoint.y - 3);
+
+  strokeTrack(context, points, projected, (point) => !point.riding, TRACK_WATER_IDLE_COLOR, 1.5);
+  strokeTrack(context, points, projected, (point) => point.riding, TRACK_WATER_RIDING_COLOR, 1.75);
+  drawDot(context, launchPoint, 5.5, "#17252a");
+  drawDot(context, project(analysis.landing), 3, "#b8d354", "#17252a");
+
+  // Wind arrow, pointing the way the wind blows.
+  context.fillStyle = "#17252a";
+  context.strokeStyle = "#17252a";
+  context.textAlign = "center";
+  context.textBaseline = "top";
+  context.font = "700 9px ui-monospace, SFMono-Regular, Menlo, monospace";
+  context.fillText("WIND", width / 2, 6);
+  context.lineWidth = 2;
+  context.beginPath();
+  context.moveTo(width / 2, 19);
+  context.lineTo(width / 2, 30);
+  context.stroke();
+  context.beginPath();
+  context.moveTo(width / 2 - 5, 28);
+  context.lineTo(width / 2 + 5, 28);
+  context.lineTo(width / 2, 35);
+  context.closePath();
+  context.fill();
+
+  // Scale bar.
+  const barMetres = niceStep(((width - padding.left - padding.right) * 0.3) / scale, 1);
+  const barY = height - 14;
+  context.lineWidth = 1.5;
+  context.beginPath();
+  context.moveTo(padding.left, barY - 4);
+  context.lineTo(padding.left, barY);
+  context.lineTo(padding.left + barMetres * scale, barY);
+  context.lineTo(padding.left + barMetres * scale, barY - 4);
+  context.stroke();
+  context.font = "9px ui-monospace, SFMono-Regular, Menlo, monospace";
+  context.textAlign = "left";
+  context.textBaseline = "bottom";
+  context.fillStyle = "#6f7d7e";
+  context.fillText(formatDistance(barMetres), padding.left + barMetres * scale + 7, barY + 3);
+
+  const hovered = trackWaterRenderState.hoveredPoint;
+  if (hovered) drawHoverMarker(context, project(hovered));
+}
+
+function drawUpwindChart(analysis, coaching) {
+  const { context, width, height } = prepareCanvas(trackWaterChartCanvas, 240, 200);
+  const { points } = analysis;
+  const padding = { top: 14, right: 14, bottom: 28, left: 54 };
+  const plotBottom = height - padding.bottom;
+  const duration = Math.max(analysis.sessionEnd - analysis.sessionStart, 1);
+  const lowest = Math.min(0, ...points.map((point) => point.upwind));
+  const highest = Math.max(0, ...points.map((point) => point.upwind));
+  const step = niceStep(Math.max(highest - lowest, 20), 5);
+  const minimum = Math.floor(lowest / step) * step;
+  const maximum = Math.ceil(highest / step) * step;
+  const x = (timestamp) => padding.left + ((timestamp - analysis.sessionStart) / duration) * (width - padding.left - padding.right);
+  const y = (metres) => plotBottom - ((metres - minimum) / (maximum - minimum)) * (plotBottom - padding.top);
+
+  // Time not spent riding: before the first ride, long breaks, and after the last ride.
+  context.fillStyle = "rgba(23, 37, 42, .06)";
+  const idle = [
+    [analysis.sessionStart, analysis.waterStart],
+    ...coaching.stops.filter((stop) => stop.kind === "break").map((stop) => [stop.startTimestamp, stop.endTimestamp]),
+    [analysis.waterEnd, analysis.sessionEnd],
+  ];
+  idle.forEach(([from, to]) => context.fillRect(x(from), padding.top, Math.max(0, x(to) - x(from)), plotBottom - padding.top));
+
+  context.lineWidth = 1;
+  context.font = "9px ui-monospace, SFMono-Regular, Menlo, monospace";
+  context.textAlign = "right";
+  context.textBaseline = "middle";
+  for (let tick = minimum; tick <= maximum + step / 2; tick += step) {
+    const level = Math.round(tick);
+    context.strokeStyle = level === 0 ? "rgba(23, 37, 42, 0.45)" : "rgba(55, 77, 80, 0.16)";
+    context.fillStyle = level === 0 ? "#17252a" : "#9ba5a3";
+    context.fillText(level === 0 ? "launch" : `${level > 0 ? "+" : "−"}${number(Math.abs(level))} m`, padding.left - 8, y(level));
+    context.beginPath();
+    context.moveTo(padding.left, y(level));
+    context.lineTo(width - padding.right, y(level));
+    context.stroke();
+  }
+  context.fillStyle = "#9ba5a3";
+  context.textBaseline = "alphabetic";
+  const tickStep = [300, 600, 900, 1200, 1800, 3600].find((seconds) => duration / seconds <= 7) ?? 7200;
+  for (let elapsed = 0; elapsed <= duration; elapsed += tickStep) {
+    context.textAlign = elapsed === 0 ? "left" : "center";
+    context.fillText(`${Math.floor(elapsed / 3600)}:${String(Math.floor((elapsed % 3600) / 60)).padStart(2, "0")}`, x(analysis.sessionStart + elapsed), height - 8);
+  }
+
+  const projected = points.map((point) => ({ x: x(point.timestamp), y: y(point.upwind) }));
+  strokeTrack(context, points, projected, (point) => !point.riding, TRACK_WATER_IDLE_COLOR, 1.5);
+  strokeTrack(context, points, projected, (point) => point.riding, TRACK_WATER_RIDING_COLOR, 2);
+
+  const hovered = trackWaterRenderState.hoveredPoint;
+  if (hovered) {
+    const marker = { x: x(hovered.timestamp), y: y(hovered.upwind) };
+    context.strokeStyle = "rgba(23, 37, 42, 0.35)";
+    context.lineWidth = 1;
+    context.beginPath();
+    context.moveTo(marker.x, padding.top);
+    context.lineTo(marker.x, plotBottom);
+    context.stroke();
+    drawHoverMarker(context, marker);
+  }
+  trackWaterRenderState.chart = { x, y, left: padding.left, right: width - padding.right, duration };
+}
+
+function showTrackWaterChartTooltip(point) {
+  const tooltip = $("#trackWaterChartTooltip");
+  const { analysis, chart } = trackWaterRenderState;
+  if (!point || !chart) {
+    tooltip.classList.add("hidden");
+    return;
+  }
+  tooltip.replaceChildren(
+    element("strong", "", Math.abs(point.upwind) < 1 ? "Level with the launch" : `${formatDistance(Math.abs(point.upwind))} ${point.upwind >= 0 ? "upwind" : "downwind"}`),
+    element("span", "", `${formatTime(point.timestamp)} · ${formatDuration(point.timestamp - analysis.sessionStart)} in`),
+    element("span", "", point.riding ? `Riding at ${formatSpeed(point.speed)}` : "Not riding"),
+  );
+  tooltip.classList.remove("hidden");
+  placeTooltip(tooltip, trackWaterChartCanvas.parentElement, chart.x(point.timestamp), chart.y(point.upwind));
+}
+
+function renderTrackWaterUpwind(analysis, summary, coaching) {
+  const { wind, launchLanding } = analysis;
+  const plots = $("#trackWaterPlots");
+  const details = $("#trackWaterSectionDetails");
+  plots.classList.toggle("hidden", !wind);
+  details.classList.toggle("hidden", !wind);
+  setText("#trackWaterWindSource", wind ? `${windStatusText(summary.wind)} · from ${formatWindDirection(wind.direction)}` : "");
+
+  const edgeNote = launchLanding.startedRiding || launchLanding.endedRiding
+    ? `the recording ${launchLanding.startedRiding && launchLanding.endedRiding ? "starts and ends" : launchLanding.startedRiding ? "starts" : "ends"} while riding`
+    : null;
+  if (!wind) {
+    setText("#trackWaterUpwindCopy", summary.wind?.status === "loading"
+      ? "Ground gained upwind needs a wind direction. Wind data is still loading."
+      : "Ground gained upwind needs a wind direction, and none is available for this session. The distance between launch and landing does not depend on it.");
+    $("#trackWaterUpwindStats").replaceChildren(
+      statTile("Launch to landing", formatDistance(launchLanding.distance), edgeNote ?? "straight line between the two"),
+      statTile("Landing against launch", "—", "needs a wind direction"),
+      statTile("Highest point", "—", "needs a wind direction"),
+      statTile("Lowest point", "—", "needs a wind direction"),
+    );
+    $("#trackWaterSectionBody").replaceChildren();
+    trackWaterRenderState.hoveredPoint = null;
+    showTrackWaterChartTooltip(null);
+    return;
+  }
+
+  const sentences = [
+    "Both plots are turned so the wind comes from the top, using one wind direction for the whole session. Up is ground gained against the wind, and the launch is the zero line.",
+    launchLanding.uncertaintyMetres >= 5
+      ? `These figures are only as good as the wind direction: if it is ${number(launchLanding.windErrorDegrees)} deg off, the landing figure moves by about ${formatDistance(launchLanding.uncertaintyMetres)}, and positions at the far ends of the run move more.`
+      : "These figures are only as good as the wind direction: when it is off, positions at the far ends of the run move the most.",
+  ];
+  if (wind.shiftDegrees > analysis.options.windShiftNoteDegrees) sentences.push(`The wind direction shifted by up to ${number(wind.shiftDegrees, 0)} deg during the session, so one direction is a compromise.`);
+  setText("#trackWaterUpwindCopy", sentences.join(" "));
+
+  const offset = launchLanding.upwindMetres;
+  const { highest, lowest, sections } = analysis.upwind;
+  const best = sections.filter((section) => section.netMetres !== null).reduce((top, section) => (!top || section.netMetres > top.netMetres ? section : top), null);
+  $("#trackWaterUpwindStats").replaceChildren(
+    statTile("Landing against launch", launchLanding.distance < 15 ? "≈ 0 m" : `${formatDistance(Math.abs(offset))} ${offset >= 0 ? "upwind" : "downwind"}`, edgeNote ?? (launchLanding.distance < 15 ? `back at the launch, ${formatDistance(launchLanding.distance)} apart` : `${formatDistance(launchLanding.distance)} apart in a straight line`)),
+    statTile("Highest point", formatSignedDistance(highest.metres), `against the launch, at ${formatTime(highest.timestamp)}`),
+    statTile("Lowest point", formatSignedDistance(lowest.metres), `against the launch, at ${formatTime(lowest.timestamp)}`),
+    statTile("Most ground gained", best ? formatSignedDistance(best.netMetres) : "—", best ? `in ${best.label.toLowerCase()}` : "no ride section with a track"),
+  );
+  $("#trackWaterSectionBody").replaceChildren(...sections.map((section) => {
+    const row = element("tr");
+    const name = element("td", "", section.label);
+    name.append(element("small", "", `${formatTime(section.startTimestamp)} – ${formatTime(section.endTimestamp)}`));
+    row.append(
+      name,
+      element("td", "is-number", formatSignedDistance(section.startMetres)),
+      element("td", "is-number", formatSignedDistance(section.endMetres)),
+      element("td", "is-number", formatSignedDistance(section.netMetres)),
+    );
+    return row;
+  }));
+
+  if (!analysis.points.includes(trackWaterRenderState.hoveredPoint)) {
+    trackWaterRenderState.hoveredPoint = null;
+    showTrackWaterChartTooltip(null);
+  }
+  drawWindUpPlot(analysis);
+  drawUpwindChart(analysis, coaching);
+}
+
+function drawTrackWaterMap(analysis) {
+  const canvas = trackWaterMapCanvas;
+  const wrapper = canvas.parentElement;
+  canvas.style.display = "block";
+  const width = Math.max(240, Math.floor(wrapper.clientWidth));
+  const height = Math.max(260, Math.floor(wrapper.clientHeight));
+  const ratio = Math.min(window.devicePixelRatio || 1, 1.5);
+  canvas.width = width * ratio;
+  canvas.height = height * ratio;
+  canvas.style.width = `${width}px`;
+  canvas.style.height = `${height}px`;
+  const context = canvas.getContext("2d");
+  context.setTransform(ratio, 0, 0, ratio, 0, 0);
+  context.clearRect(0, 0, width, height);
+
+  const { points } = analysis;
+  const tileContainer = trackWaterMapTiles;
+  const bounds = points.reduce((result, point) => ({
+    minLatitude: Math.min(result.minLatitude, point.latitude),
+    maxLatitude: Math.max(result.maxLatitude, point.latitude),
+    minLongitude: Math.min(result.minLongitude, point.longitude),
+    maxLongitude: Math.max(result.maxLongitude, point.longitude),
+  }), { minLatitude: 90, maxLatitude: -90, minLongitude: 180, maxLongitude: -180 });
+  const requestedZoom = mapZoomState.get(tileContainer) ?? null;
+  const pan = mapPanState.get(tileContainer) ?? { x: 0, y: 0 };
+  const layoutKey = [width, height, points.length, bounds.minLatitude.toFixed(6), bounds.maxLatitude.toFixed(6), bounds.minLongitude.toFixed(6), bounds.maxLongitude.toFixed(6), requestedZoom ?? "auto", pan.x.toFixed(1), pan.y.toFixed(1)].join(":");
+  const cachedLayout = mapLayoutCache.get(tileContainer);
+  const map = cachedLayout?.key === layoutKey ? cachedLayout.map : loadMapTiles(points, width, height, tileContainer, requestedZoom);
+  if (cachedLayout?.key !== layoutKey) mapLayoutCache.set(tileContainer, { key: layoutKey, map });
+  const project = (point) => {
+    const projected = webMercatorPoint(point, map.zoom);
+    return { x: projected.x - map.viewportLeft, y: projected.y - map.viewportTop };
+  };
+  const projected = points.map(project);
+  const speedMode = trackWaterRenderState.mode === "speed";
+
+  strokeTrack(context, points, projected, () => true, "rgba(255, 255, 255, .9)", speedMode ? 7 : 5.5);
+  strokeTrack(context, points, projected, (point) => !point.riding, "#879793", 2);
+  if (speedMode) {
+    TRACK_WATER_SPEED_COLORS.forEach((color, step) => strokeTrack(context, points, projected, (point) => point.riding && point.speedStep === step, color, 3));
+  } else {
+    strokeTrack(context, points, projected, (point) => point.riding, "rgba(23, 37, 42, .62)", 2.25);
+  }
+  drawDot(context, project(analysis.launch), 6, "#17252a");
+  drawDot(context, project(analysis.landing), 3.5, "#b8d354", "#17252a");
+
+  const marks = speedMode ? [] : analysis.events.filter((event) => event.placed).map((event) => ({ event, ...project(event.point) }));
+  marks.forEach((mark) => drawCross(context, mark.x, mark.y, false));
+  const hoveredMark = marks.find((mark) => mark.event === trackWaterRenderState.hoveredEvent);
+  if (hoveredMark) drawCross(context, hoveredMark.x, hoveredMark.y, true);
+  const hoveredPoint = speedMode ? trackWaterRenderState.hoveredMapPoint : null;
+  if (hoveredPoint) drawHoverMarker(context, project(hoveredPoint));
+
+  trackWaterRenderState.mapMarks = marks;
+  trackWaterRenderState.mapPoints = speedMode ? points.map((point, index) => ({ point, ...projected[index] })).filter((entry) => entry.point.riding) : [];
+  trackWaterRenderState.projectMapPoint = project;
+}
+
+function showTrackWaterMapTooltip(lines, x, y) {
+  const tooltip = $("#trackWaterMapTooltip");
+  if (!lines) {
+    tooltip.classList.add("hidden");
+    return;
+  }
+  tooltip.replaceChildren(...lines);
+  tooltip.classList.remove("hidden");
+  placeTooltip(tooltip, trackWaterMapCanvas.parentElement, x, y);
+}
+
+function trackWaterStopSentence(analysis) {
+  const { events, cluster, zoneCounts, placedEventCount } = analysis;
+  if (!events.length) return "No stops were found in this session.";
+  const unplaced = events.length - placedEventCount;
+  const sentences = [];
+  if (cluster) {
+    sentences.push(`${number(cluster.count)} of ${number(cluster.total)} stops happened at the ${cluster.zone} of your run, so that is the place to watch.`);
+  } else if (zoneCounts.length && placedEventCount) {
+    sentences.push(`The stops are spread along your run: ${zoneCounts.map((entry) => `${number(entry.count)} ${entry.zone === "middle" ? "in the middle" : `at the ${entry.zone}`}`).join(", ")}.`);
+  } else if (placedEventCount) {
+    sentences.push(`${number(placedEventCount)} ${placedEventCount === 1 ? "stop is" : "stops are"} marked on the map.`);
+  }
+  sentences.push(`Each stop is drawn at the last GPS fix before it, because the watch loses GPS in the water.`);
+  if (unplaced) sentences.push(`${number(unplaced)} ${unplaced === 1 ? "stop" : "stops"} could not be placed: there was no fix within ${number(analysis.options.eventFixSeconds)} seconds.`);
+  return sentences.join(" ");
+}
+
+function renderTrackWaterMap(analysis) {
+  const speedMode = trackWaterRenderState.mode === "speed";
+  document.querySelectorAll("[data-track-water-mode]").forEach((button) => {
+    const active = button.dataset.trackWaterMode === trackWaterRenderState.mode;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+  setText("#trackWaterMapTitle", speedMode ? "Where you were fast" : "Where the stops happened");
+  setText("#trackWaterMapCopy", speedMode
+    ? `Riding stretches are coloured by speed, light for slow and dark for fast, using the ${number(currentActivity.segmentation.options.smoothingSeconds)}-second median. Turns are always light; a light patch in the middle of a leg, or a zone that is dark on every pass, says something about the spot.`
+    : trackWaterStopSentence(analysis));
+
+  const entry = (swatch, text) => {
+    const item = element("span");
+    item.append(swatch, document.createTextNode(text));
+    return item;
+  };
+  const legend = [];
+  if (speedMode && analysis.speedScale) {
+    const { bounds } = analysis.speedScale;
+    const kilometres = (speed) => number(speed * 3.6, 0);
+    TRACK_WATER_SPEED_COLORS.forEach((color, step) => {
+      const swatch = element("i", "track-water-step");
+      swatch.style.background = color;
+      const text = step === 0 ? `under ${kilometres(bounds[1])}` : step === TRACK_WATER_SPEED_COLORS.length - 1 ? `over ${kilometres(bounds[step])} km/h` : `${kilometres(bounds[step])}–${kilometres(bounds[step + 1])}`;
+      legend.push(entry(swatch, text));
+    });
+  } else {
+    legend.push(entry(element("i", "coaching-swatch is-stopped"), "stop"), entry(element("i", "track-water-line is-track"), "riding"));
+  }
+  legend.push(entry(element("i", "track-water-line is-idle"), "not riding"), entry(element("i", "map-marker-dot start"), "launch"), entry(element("i", "map-marker-dot end"), "landing"));
+  $("#trackWaterMapLegend").replaceChildren(...legend);
+
+  if (!analysis.events.includes(trackWaterRenderState.hoveredEvent)) trackWaterRenderState.hoveredEvent = null;
+  if (!analysis.points.includes(trackWaterRenderState.hoveredMapPoint)) trackWaterRenderState.hoveredMapPoint = null;
+  if (!trackWaterRenderState.hoveredEvent && !trackWaterRenderState.hoveredMapPoint) showTrackWaterMapTooltip(null);
+  drawTrackWaterMap(analysis);
+
+  const rows = analysis.events.map((event) => {
+    const row = element("tr");
+    const time = element("td", "", formatTime(event.timestamp));
+    time.append(element("small", "", `${formatDuration(event.timestamp - analysis.sessionStart)} in`));
+    row.append(
+      time,
+      element("td", "", TRACK_WATER_CONTEXT_LABELS[event.context] ?? "Unclear"),
+      element("td", event.placed ? "" : "is-muted", event.placed ? (event.zone ?? "on the map") : "no GPS fix nearby"),
+      element("td", "is-number", formatSeconds(event.restartSeconds)),
+    );
+    return row;
+  });
+  if (!rows.length) {
+    const row = element("tr");
+    row.append(element("td", "is-muted", "No stops in this session."));
+    rows.push(row);
+  }
+  $("#trackWaterStopBody").replaceChildren(...rows);
+}
+
+function renderTrackWater(summary) {
+  const analysis = trackWaterFor(summary);
+  setText("#trackWaterActivityTitle", sessionTitle(summary));
+  setText("#trackWaterActivityDate", formatDate(summary.starts));
+  $("#trackWaterUnavailable").classList.toggle("hidden", analysis.available);
+  $("#trackWaterSections").classList.toggle("hidden", !analysis.available);
+  trackWaterRenderState.analysis = analysis.available ? analysis : null;
+  if (!analysis.available) return;
+  renderTrackWaterUpwind(analysis, summary, coachingFor(summary));
+  renderTrackWaterMap(analysis);
+}
+
+function bindTrackWaterInteractions() {
+  const redrawPlots = () => {
+    const { analysis } = trackWaterRenderState;
+    drawWindUpPlot(analysis);
+    drawUpwindChart(analysis, coachingFor(currentActivity));
+  };
+  trackWaterChartCanvas.addEventListener("pointermove", (event) => {
+    const { analysis, chart } = trackWaterRenderState;
+    if (!analysis?.wind || !chart) return;
+    const { x } = canvasPointerPosition(trackWaterChartCanvas, event);
+    const timestamp = analysis.sessionStart + ((clamp(x, chart.left, chart.right) - chart.left) / (chart.right - chart.left)) * chart.duration;
+    const nearest = analysis.points.reduce((best, point) => (Math.abs(point.timestamp - timestamp) < Math.abs(best.timestamp - timestamp) ? point : best), analysis.points[0]);
+    if (nearest === trackWaterRenderState.hoveredPoint) return;
+    trackWaterRenderState.hoveredPoint = nearest;
+    redrawPlots();
+    showTrackWaterChartTooltip(nearest);
+  });
+  trackWaterChartCanvas.addEventListener("pointerleave", () => {
+    if (!trackWaterRenderState.hoveredPoint || !trackWaterRenderState.analysis?.wind) return;
+    trackWaterRenderState.hoveredPoint = null;
+    redrawPlots();
+    showTrackWaterChartTooltip(null);
+  });
+
+  const nearestWithin = (entries, x, y, limit) => entries.reduce((best, entry) => {
+    const distance = Math.hypot(entry.x - x, entry.y - y);
+    return distance < limit && (!best || distance < best.distance) ? { entry, distance } : best;
+  }, null)?.entry ?? null;
+  const clearMapHover = () => {
+    if (!trackWaterRenderState.hoveredEvent && !trackWaterRenderState.hoveredMapPoint) return;
+    trackWaterRenderState.hoveredEvent = null;
+    trackWaterRenderState.hoveredMapPoint = null;
+    showTrackWaterMapTooltip(null);
+    if (trackWaterRenderState.analysis) drawTrackWaterMap(trackWaterRenderState.analysis);
+  };
+  trackWaterMapCanvas.addEventListener("pointermove", (event) => {
+    const { analysis } = trackWaterRenderState;
+    if (!analysis) return;
+    if (mapPointerState.get(trackWaterMapCanvas)?.dragging) {
+      clearMapHover();
+      return;
+    }
+    const { x, y } = canvasPointerPosition(trackWaterMapCanvas, event);
+    if (trackWaterRenderState.mode === "speed") {
+      const hit = nearestWithin(trackWaterRenderState.mapPoints, x, y, 16);
+      if ((hit?.point ?? null) === trackWaterRenderState.hoveredMapPoint) return;
+      if (!hit) return clearMapHover();
+      trackWaterRenderState.hoveredMapPoint = hit.point;
+      drawTrackWaterMap(analysis);
+      showTrackWaterMapTooltip([
+        element("strong", "", formatSpeed(hit.point.speed)),
+        element("span", "", `${formatTime(hit.point.timestamp)} · ${formatDuration(hit.point.timestamp - analysis.sessionStart)} in`),
+      ], hit.x, hit.y);
+      return;
+    }
+    const mark = nearestWithin(trackWaterRenderState.mapMarks, x, y, 24);
+    if ((mark?.event ?? null) === trackWaterRenderState.hoveredEvent) return;
+    if (!mark) return clearMapHover();
+    trackWaterRenderState.hoveredEvent = mark.event;
+    drawTrackWaterMap(analysis);
+    showTrackWaterMapTooltip([
+      element("strong", "", `Stop ${(TRACK_WATER_CONTEXT_LABELS[mark.event.context] ?? "Unclear").toLowerCase()}`),
+      element("span", "", `${formatTime(mark.event.timestamp)} · ${formatDuration(mark.event.timestamp - analysis.sessionStart)} in`),
+      ...(mark.event.zone ? [element("span", "", mark.event.zone === "middle" ? "In the middle of the run" : `At the ${mark.event.zone} of the run`)] : []),
+      element("span", "", `Riding again after ${formatSeconds(mark.event.restartSeconds)}`),
+    ], mark.x, mark.y);
+  });
+  trackWaterMapCanvas.addEventListener("pointerleave", clearMapHover);
+
+  document.querySelectorAll("[data-track-water-mode]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (trackWaterRenderState.mode === button.dataset.trackWaterMode) return;
+      trackWaterRenderState.mode = button.dataset.trackWaterMode;
+      trackWaterRenderState.hoveredEvent = null;
+      trackWaterRenderState.hoveredMapPoint = null;
+      showTrackWaterMapTooltip(null);
+      if (currentActivity) scheduleVisualRender();
+    });
+  });
+}
+
 function activePage() {
   const page = window.location.hash.slice(1);
-  return ["overview", "speed-effort", "ride-segments", "coaching"].includes(page) ? page : "overview";
+  return ["overview", "speed-effort", "track-water", "ride-segments", "coaching"].includes(page) ? page : "overview";
 }
 
 function updatePage() {
@@ -1637,7 +2213,8 @@ function updatePage() {
   const analysisActive = page === "speed-effort";
   const segmentsActive = page === "ride-segments";
   const coachingActive = page === "coaching";
-  setText("#pageLabel", overviewActive ? "overview" : analysisActive ? "session overview" : segmentsActive ? "ride segments" : "coaching");
+  const trackWaterActive = page === "track-water";
+  setText("#pageLabel", { overview: "overview", "speed-effort": "session overview", "track-water": "track & water", "ride-segments": "ride segments", coaching: "coaching" }[page]);
   document.querySelectorAll("[data-page]").forEach((link) => link.classList.toggle("active", link.dataset.page === page));
   overviewIntro.classList.toggle("hidden", !overviewActive);
   emptyState.classList.toggle("hidden", !overviewActive || Boolean(currentActivity));
@@ -1651,6 +2228,9 @@ function updatePage() {
   coachingPage.classList.toggle("hidden", !coachingActive);
   coachingEmpty.classList.toggle("hidden", Boolean(currentActivity) || !coachingActive);
   coachingBody.classList.toggle("hidden", !currentActivity || !coachingActive);
+  trackWaterPage.classList.toggle("hidden", !trackWaterActive);
+  trackWaterEmpty.classList.toggle("hidden", Boolean(currentActivity) || !trackWaterActive);
+  trackWaterBody.classList.toggle("hidden", !currentActivity || !trackWaterActive);
   if (currentActivity) scheduleVisualRender();
 }
 
@@ -1663,6 +2243,7 @@ function scheduleVisualRender() {
     if (page === "speed-effort") renderAnalysis(currentActivity);
     else if (page === "ride-segments") renderRideSegments(currentActivity);
     else if (page === "coaching") renderCoaching(currentActivity);
+    else if (page === "track-water") renderTrackWater(currentActivity);
     else renderCharts(currentActivity);
   });
 }
@@ -1772,18 +2353,22 @@ function render(activity, fileName) {
   mapZoomState.delete(mapTiles);
   mapZoomState.delete(analysisMapTiles);
   mapZoomState.delete(segmentsMapTiles);
+  mapZoomState.delete(trackWaterMapTiles);
   mapPanState.delete(mapTiles);
   mapPanState.delete(analysisMapTiles);
   mapPanState.delete(segmentsMapTiles);
+  mapPanState.delete(trackWaterMapTiles);
   mapLayoutCache.delete(mapTiles);
   mapLayoutCache.delete(analysisMapTiles);
   mapLayoutCache.delete(segmentsMapTiles);
+  mapLayoutCache.delete(trackWaterMapTiles);
   currentActivity = summarize(activity);
   currentActivity.segmentation = segmentTrack(currentActivity.records);
   analysisSelectionIndex = null;
   selectedSegmentIndex = null;
   segmentRenderState = { map: null };
   coachingRenderState = { marks: [], hoveredTurn: null, coaching: null };
+  trackWaterRenderState = emptyTrackWaterState(trackWaterRenderState.mode);
   analysisMapFocus = null;
   updateCoachingFocusUI();
   const summary = currentActivity;
@@ -1879,6 +2464,7 @@ $("#newFileButton").addEventListener("click", () => input.click());
 $("#analysisLoadButton").addEventListener("click", () => input.click());
 $("#segmentsLoadButton").addEventListener("click", () => input.click());
 $("#coachingLoadButton").addEventListener("click", () => input.click());
+$("#trackWaterLoadButton").addEventListener("click", () => input.click());
 $("#dismissError").addEventListener("click", hideError);
 inventoryToggle.addEventListener("click", () => {
   const expanded = inventoryToggle.getAttribute("aria-expanded") === "true";
@@ -1917,8 +2503,10 @@ window.addEventListener("resize", () => {
 bindAnalysisInteractions();
 bindSegmentInteractions();
 bindCoachingInteractions();
+bindTrackWaterInteractions();
 bindMapPanning(analysisMapCanvas, analysisMapTiles);
 bindMapPanning(segmentsMapCanvas, segmentsMapTiles);
+bindMapPanning(trackWaterMapCanvas, trackWaterMapTiles);
 
 if (new URLSearchParams(window.location.search).has("demo")) {
   const demoActivity = createDemoActivity();
