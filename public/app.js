@@ -1,4 +1,5 @@
 import { dateFromFit, decodeFit, getField } from "./fit-decoder.js";
+import { analyzeCoaching } from "./coaching.js";
 import { createDemoActivity } from "./demo-session.js";
 import { sectionContainsIndex, segmentTrack } from "./track-segmentation.js";
 import { calculateWindCoaching, resolveWindAnnotation, summarizeAnnotatedWind } from "./wind-annotation.js";
@@ -32,6 +33,10 @@ const analysisMapTiles = $("#analysisMapTiles");
 const segmentsMapCanvas = $("#segmentsMapCanvas");
 const segmentsMapTiles = $("#segmentsMapTiles");
 const segmentsList = $("#segmentsList");
+const coachingPage = $("#coachingPage");
+const coachingEmpty = $("#coachingEmpty");
+const coachingBody = $("#coachingBody");
+const coachingTurnCanvas = $("#coachingTurnChart");
 
 const OVERVIEW_POINT_LIMIT = 720;
 const MAP_POINT_LIMIT = 720;
@@ -44,6 +49,7 @@ let analysisSelectionIndex = null;
 let analysisRenderState = { speed: null, heart: null, wind: null, map: null };
 let selectedSegmentIndex = null;
 let segmentRenderState = { map: null };
+let coachingRenderState = { marks: [], hoveredTurn: null, coaching: null };
 let windAnnotationRequest = 0;
 let analysisMapFocus = null;
 const mapLayoutCache = new WeakMap();
@@ -1216,9 +1222,413 @@ function bindSegmentInteractions() {
   });
 }
 
+const COACHING_SIDE_COLORS = ["#2a78d6", "#eb6834"];
+const COACHING_NEUTRAL_COLOR = "#898781";
+const COACHING_STOPPED_COLOR = "#d03b3b";
+const COACHING_TONE_LABELS = { focus: "Work on", strength: "Going well", note: "Worth knowing" };
+
+function coachingFor(summary) {
+  const recordWind = summary.wind?.recordWind?.some(Boolean) ? summary.wind.recordWind : null;
+  if (!summary.coaching || summary.coachingWind !== recordWind) {
+    summary.coaching = analyzeCoaching(summary.segmentation, { recordWind });
+    summary.coachingWind = recordWind;
+  }
+  return summary.coaching;
+}
+
+function element(tag, className = "", text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+function statTile(label, value, detail) {
+  const tile = element("div", "segments-stat");
+  tile.append(element("span", "", label), element("strong", "", value), element("small", "", detail));
+  return tile;
+}
+
+function formatShare(share) {
+  return typeof share === "number" && Number.isFinite(share) ? `${number(share * 100, 0)}%` : "—";
+}
+
+function formatSeconds(seconds) {
+  if (typeof seconds !== "number" || !Number.isFinite(seconds)) return "—";
+  return seconds < 90 ? `${number(seconds, 0)} s` : formatDuration(seconds);
+}
+
+function formatSignedDistance(metres) {
+  if (typeof metres !== "number" || !Number.isFinite(metres)) return "—";
+  return `${metres >= 0 ? "+" : "−"}${formatDistance(Math.abs(metres))}`;
+}
+
+function sideSwatch(sideKey) {
+  return element("i", `coaching-swatch${sideKey === 0 || sideKey === 1 ? ` is-side-${sideKey}` : ""}`);
+}
+
+function sideLabel(coaching, sideKey) {
+  return coaching.sides[sideKey]?.label ?? "another direction";
+}
+
+function renderCoachingTakeaways(coaching) {
+  const cards = coaching.takeaways.map((takeaway) => {
+    const card = element("article", `coaching-takeaway is-${takeaway.tone}`);
+    card.append(element("span", "coaching-takeaway-tone", COACHING_TONE_LABELS[takeaway.tone]), element("strong", "", takeaway.title), element("p", "", takeaway.text));
+    return card;
+  });
+  $("#coachingTakeaways").replaceChildren(...(cards.length ? cards : [element("p", "coaching-takeaway-empty", "Not enough turns or riding time in this session to draw conclusions.")]));
+}
+
+function drawTurnChart(coaching) {
+  const wrapper = coachingTurnCanvas.parentElement;
+  const width = Math.max(240, Math.floor(wrapper.clientWidth));
+  const height = Math.max(200, Math.floor(wrapper.clientHeight));
+  const ratio = Math.min(window.devicePixelRatio || 1, 2);
+  coachingTurnCanvas.width = width * ratio;
+  coachingTurnCanvas.height = height * ratio;
+  const context = coachingTurnCanvas.getContext("2d");
+  context.setTransform(ratio, 0, 0, ratio, 0, 0);
+  context.clearRect(0, 0, width, height);
+
+  const padding = { top: 12, right: 14, bottom: 48, left: 44 };
+  const plotBottom = height - padding.bottom;
+  const stopLane = plotBottom + 17;
+  const duration = Math.max(coaching.sessionEnd - coaching.sessionStart, 1);
+  const x = (timestamp) => padding.left + ((timestamp - coaching.sessionStart) / duration) * (width - padding.left - padding.right);
+  const y = (share) => plotBottom - share * (plotBottom - padding.top);
+
+  // Time not spent riding: before the first ride, long breaks, and after the last ride.
+  context.fillStyle = "rgba(23, 37, 42, .06)";
+  const idle = [
+    [coaching.sessionStart, coaching.waterStart],
+    ...coaching.stops.filter((stop) => stop.kind === "break").map((stop) => [stop.startTimestamp, stop.endTimestamp]),
+    [coaching.waterEnd, coaching.sessionEnd],
+  ];
+  idle.forEach(([from, to]) => context.fillRect(x(from), padding.top, Math.max(0, x(to) - x(from)), stopLane + 9 - padding.top));
+
+  context.strokeStyle = "rgba(55, 77, 80, 0.16)";
+  context.lineWidth = 1;
+  context.fillStyle = "#9ba5a3";
+  context.font = "9px ui-monospace, SFMono-Regular, Menlo, monospace";
+  context.textAlign = "right";
+  context.textBaseline = "middle";
+  [0, 0.25, 0.5, 0.75, 1].forEach((share) => {
+    context.fillText(`${share * 100}%`, padding.left - 8, y(share));
+    context.beginPath();
+    context.moveTo(padding.left, y(share));
+    context.lineTo(width - padding.right, y(share));
+    context.stroke();
+  });
+  context.fillText("stop", padding.left - 8, stopLane);
+  context.textAlign = "center";
+  context.textBaseline = "alphabetic";
+  const tickStep = [300, 600, 900, 1200, 1800, 3600].find((step) => duration / step <= 7) ?? 7200;
+  for (let elapsed = 0; elapsed <= duration; elapsed += tickStep) {
+    const label = `${Math.floor(elapsed / 3600)}:${String(Math.floor((elapsed % 3600) / 60)).padStart(2, "0")}`;
+    context.textAlign = elapsed === 0 ? "left" : "center";
+    context.fillText(label, x(coaching.sessionStart + elapsed), height - 8);
+  }
+
+  const marks = coaching.turns.map((turn) => ({ turn, x: x(turn.timestamp), y: turn.outcome === "made" ? y(turn.speedKept) : stopLane }));
+  const drawMark = (mark, hovered) => {
+    if (mark.turn.outcome === "made") {
+      context.fillStyle = "#fbfcf8";
+      context.beginPath();
+      context.arc(mark.x, mark.y, 6, 0, Math.PI * 2);
+      context.fill();
+      context.fillStyle = COACHING_SIDE_COLORS[mark.turn.toSide] ?? COACHING_NEUTRAL_COLOR;
+      context.beginPath();
+      context.arc(mark.x, mark.y, 4, 0, Math.PI * 2);
+      context.fill();
+    } else {
+      const cross = (color, lineWidth, size) => {
+        context.strokeStyle = color;
+        context.lineWidth = lineWidth;
+        context.lineCap = "round";
+        context.beginPath();
+        context.moveTo(mark.x - size, mark.y - size);
+        context.lineTo(mark.x + size, mark.y + size);
+        context.moveTo(mark.x + size, mark.y - size);
+        context.lineTo(mark.x - size, mark.y + size);
+        context.stroke();
+      };
+      cross("#fbfcf8", 5.5, 4.5);
+      cross(COACHING_STOPPED_COLOR, 2, 4);
+    }
+    if (hovered) {
+      context.strokeStyle = "#17252a";
+      context.lineWidth = 1.5;
+      context.beginPath();
+      context.arc(mark.x, mark.y, 9, 0, Math.PI * 2);
+      context.stroke();
+    }
+  };
+  marks.forEach((mark) => drawMark(mark, false));
+  const hovered = marks.find((mark) => mark.turn === coachingRenderState.hoveredTurn);
+  if (hovered) drawMark(hovered, true);
+  coachingRenderState.marks = marks;
+  coachingRenderState.coaching = coaching;
+}
+
+function showTurnTooltip(mark) {
+  const tooltip = $("#coachingTurnTooltip");
+  if (!mark) {
+    tooltip.classList.add("hidden");
+    return;
+  }
+  const { coaching } = coachingRenderState;
+  const { turn } = mark;
+  const line = (text) => element("span", "", text);
+  const onto = element("span");
+  onto.append(sideSwatch(turn.toSide), document.createTextNode(`onto ${sideLabel(coaching, turn.toSide)} legs`));
+  const lines = turn.outcome === "made"
+    ? [
+      element("strong", "", `${formatShare(turn.speedKept)} speed kept`),
+      line(`${formatTime(turn.timestamp)} · ${formatDuration(turn.timestamp - coaching.sessionStart)} in`),
+      onto,
+      line(`In at ${formatSpeed(turn.entrySpeed)}, slowest ${formatSpeed(turn.slowestSpeed)}`),
+      line(turn.recoverySeconds === null ? "Not back to speed before the next turn" : `Back to speed in ${formatSeconds(turn.recoverySeconds)}`),
+    ]
+    : [
+      element("strong", "", "Ended in a stop"),
+      line(`${formatTime(turn.timestamp)} · ${formatDuration(turn.timestamp - coaching.sessionStart)} in`),
+      onto,
+      line(`Riding again after ${formatSeconds(turn.restartSeconds)}`),
+    ];
+  tooltip.replaceChildren(...lines);
+  tooltip.classList.remove("hidden");
+  const wrapper = coachingTurnCanvas.parentElement;
+  const left = clamp(mark.x + 14, 0, Math.max(0, wrapper.clientWidth - tooltip.offsetWidth));
+  const above = mark.y - tooltip.offsetHeight - 12;
+  tooltip.style.left = `${left}px`;
+  tooltip.style.top = `${above >= 0 ? above : Math.min(mark.y + 14, Math.max(0, wrapper.clientHeight - tooltip.offsetHeight))}px`;
+}
+
+function renderCoachingTurns(coaching) {
+  const summary = coaching.turnSummary;
+  setText("#coachingTurnCopy", `A turn is the change of direction between two legs. Speed kept compares the slowest moment of the turn with your speed going into it, and a turn that ends in a stop counts as not made. ${number(summary.attempted)} ${summary.attempted === 1 ? "turn was" : "turns were"} found.`);
+  $("#coachingTurnStats").replaceChildren(
+    statTile("Turns made", summary.attempted ? `${number(summary.made)} of ${number(summary.attempted)}` : "—", `${number(summary.stopped)} ended in a stop`),
+    statTile("Success rate", formatShare(summary.successRate), "ridden through without stopping"),
+    statTile("Speed kept", formatShare(summary.medianSpeedKept), summary.medianSpeedLost === null ? "median of the turns made" : `median, losing ${formatSpeed(summary.medianSpeedLost)}`),
+    statTile("Back to speed", formatSeconds(summary.medianRecoverySeconds), `median time to ${formatShare(coaching.options.recoveryShare)} of entry speed`),
+  );
+
+  const legendEntry = (swatch, text) => {
+    const entry = element("span");
+    entry.append(swatch, document.createTextNode(text));
+    return entry;
+  };
+  const legend = coaching.sides.map((side) => legendEntry(sideSwatch(side.key), `turn onto ${side.label} legs`));
+  if (coaching.turns.some((turn) => turn.outcome === "made" && turn.toSide === null)) legend.push(legendEntry(sideSwatch(null), "turn onto another direction"));
+  legend.push(legendEntry(element("i", "coaching-swatch is-stopped"), "turn ended in a stop"), legendEntry(element("i", "coaching-swatch is-break"), "not riding"));
+  $("#coachingTurnLegend").replaceChildren(...legend);
+
+  $("#coachingTurnEmpty").classList.toggle("hidden", coaching.turns.length > 0);
+  if (!coaching.turns.includes(coachingRenderState.hoveredTurn)) {
+    coachingRenderState.hoveredTurn = null;
+    showTurnTooltip(null);
+  }
+  drawTurnChart(coaching);
+
+  const cell = (text, className = "") => element("td", className, text);
+  $("#coachingTurnTableBody").replaceChildren(...coaching.turns.map((turn) => {
+    const row = element("tr");
+    const time = cell(formatTime(turn.timestamp));
+    time.append(element("small", "", `${formatDuration(turn.timestamp - coaching.sessionStart)} in`));
+    const onto = element("td");
+    onto.append(sideSwatch(turn.toSide), document.createTextNode(sideLabel(coaching, turn.toSide)));
+    const made = turn.outcome === "made";
+    row.append(
+      time,
+      onto,
+      cell(made ? "Made" : "Ended in a stop"),
+      cell(made ? formatSpeed(turn.entrySpeed) : "—", "is-number"),
+      cell(made ? formatSpeed(turn.slowestSpeed) : "—", "is-number"),
+      cell(made ? formatShare(turn.speedKept) : "—", "is-number"),
+      cell(made ? (turn.recoverySeconds === null ? "not before next turn" : formatSeconds(turn.recoverySeconds)) : `riding after ${formatSeconds(turn.restartSeconds)}`, "is-number"),
+    );
+    return row;
+  }));
+}
+
+function renderCoachingSides(coaching) {
+  const table = $("#coachingSideTable");
+  const sides = coaching.sideBalance;
+  if (sides.length < 2 || sides.some((side) => !side.legCount)) {
+    const row = element("tr");
+    row.append(element("td", "is-muted", "Not enough legs in two directions to compare."));
+    table.replaceChildren(row);
+    return;
+  }
+  const head = element("tr");
+  head.append(element("th"));
+  sides.forEach((side) => {
+    const heading = element("th", "is-number");
+    heading.append(sideSwatch(side.key), document.createTextNode(`Heading ${side.label}`));
+    head.append(heading);
+  });
+  // better: which value wins ("high" or "low"), or null when there is no better direction.
+  const row = (label, values, texts, better = null) => {
+    const line = element("tr");
+    line.append(element("td", "", label));
+    const comparable = better && values.every((value) => typeof value === "number" && Number.isFinite(value)) && values[0] !== values[1];
+    const winner = comparable ? ((values[0] > values[1]) === (better === "high") ? 0 : 1) : null;
+    texts.forEach((text, index) => line.append(element("td", `is-number${winner === index ? " is-better" : ""}`, text)));
+    return line;
+  };
+  const each = (pick) => sides.map(pick);
+  const body = element("tbody");
+  body.append(
+    row("Legs", each((side) => side.legCount), each((side) => number(side.legCount))),
+    row("Time riding", each((side) => side.seconds), each((side) => formatDuration(side.seconds))),
+    row("Average speed", each((side) => side.averageSpeed), each((side) => formatSpeed(side.averageSpeed)), "high"),
+    row("Median leg", each((side) => side.medianLegSeconds), each((side) => `${formatSeconds(side.medianLegSeconds)} · ${formatDistance(side.medianLegDistance)}`)),
+    row("Turns onto this side made", each((side) => side.turns.successRate), each((side) => (side.turns.attempted ? `${number(side.turns.made)} of ${number(side.turns.attempted)}` : "—")), "high"),
+    row("Speed kept in those turns", each((side) => side.turns.medianSpeedKept), each((side) => formatShare(side.turns.medianSpeedKept)), "high"),
+    row("Back to speed after them", each((side) => side.turns.medianRecoverySeconds), each((side) => formatSeconds(side.turns.medianRecoverySeconds)), "low"),
+    row("Stops mid-leg", each((side) => side.midLegStops), each((side) => number(side.midLegStops)), "low"),
+  );
+  const header = element("thead");
+  header.append(head);
+  table.replaceChildren(header, body);
+}
+
+function renderCoachingStops(coaching, summary) {
+  const stops = coaching.stopSummary;
+  const options = summary.segmentation.options;
+  setText("#coachingStopCopy", `A stop is any stretch out on the water where you stayed below ${formatSpeed(options.lowMovementSpeedMps)} for at least ${number(coaching.options.minimumStopSeconds)} seconds. Stops longer than ${number(coaching.options.breakSeconds / 60)} minutes count as breaks.`);
+  const where = [`${number(stops.stopsInTurns)} in a turn`, `${number(stops.stopsMidLeg)} mid-leg`];
+  if (stops.stopsUnclear) where.push(`${number(stops.stopsUnclear)} unclear`);
+  $("#coachingStopStats").replaceChildren(
+    statTile("Stops", number(stops.stopCount), where.join(" · ")),
+    statTile("Typical restart", formatSeconds(stops.medianRestartSeconds), stops.longestRestartSeconds === null ? "no stops" : `longest ${formatSeconds(stops.longestRestartSeconds)}`),
+    statTile("Time on board", formatShare(stops.boardShareOfWater), "of water time, breaks left out"),
+    statTile("Riding time", formatDuration(stops.boardSeconds), `${formatShare(stops.boardShareOfSession)} of the whole session`),
+    statTile("Breaks", number(stops.breakCount), stops.breakCount ? `${formatDuration(stops.breakSeconds)} in total` : `none longer than ${number(coaching.options.breakSeconds / 60)} minutes`),
+    statTile("Stops per hour", stops.stopsPerHour === null ? "—" : number(stops.stopsPerHour, 1), "of time on the board"),
+  );
+}
+
+function renderCoachingUpwind(coaching, wind) {
+  const upwind = coaching.upwind;
+  const stats = $("#coachingUpwindStats");
+  setText("#coachingUpwindSource", upwind ? windStatusText(wind) : "");
+  stats.classList.toggle("hidden", !upwind);
+  $("#coachingUpwindSections").classList.toggle("hidden", !upwind);
+  if (!upwind) {
+    setText("#coachingUpwindCopy", wind?.status === "loading"
+      ? "Upwind figures need a wind direction. Wind data is still loading."
+      : "Upwind figures need a wind direction, and none is available for this session.");
+    stats.replaceChildren();
+    return;
+  }
+  setText("#coachingUpwindCopy", "Each leg's course is compared with the wind direction at that moment: 0 degrees is straight into the wind and 90 degrees is straight across it. These figures are only as accurate as the wind direction, and modelled hourly wind is approximate.");
+  const net = upwind.netMetres;
+  stats.replaceChildren(
+    statTile("Closest to the wind", upwind.closest ? `${number(upwind.closest.angleToWind, 0)} deg` : "—", upwind.closest ? `${formatSpeed(upwind.closest.boardSpeed)} over ${formatSeconds(upwind.closest.seconds)}` : "no upwind leg found"),
+    statTile("Typical angle", `${upwind.sides.map((side) => (side.medianAngleToWind === null ? "—" : number(side.medianAngleToWind, 0))).join(" · ")} deg`, `median to the wind, heading ${upwind.sides.map((side) => side.label).join(" · ")}`),
+    statTile("Best upwind progress", upwind.fastest ? formatSpeed(upwind.fastest.upwindSpeed) : "—", upwind.fastest ? `made good at ${number(upwind.fastest.angleToWind, 0)} deg to the wind` : "no upwind leg found"),
+    statTile("Ground gained", formatSignedDistance(net), `${formatDistance(upwind.gainedMetres)} upwind, ${formatDistance(upwind.lostMetres)} downwind`),
+  );
+  $("#coachingUpwindSectionBody").replaceChildren(...upwind.sections.map((section) => {
+    const row = element("tr");
+    const name = element("td", "", section.label);
+    name.append(element("small", "", `${formatTime(section.startTimestamp)} – ${formatTime(section.endTimestamp)}`));
+    row.append(
+      name,
+      element("td", "is-number", number(section.legCount)),
+      element("td", "is-number", section.legCount ? formatSignedDistance(section.netMetres) : "—"),
+    );
+    return row;
+  }));
+}
+
+function renderCoachingFatigue(coaching) {
+  const fatigue = coaching.fatigue;
+  $("#coachingFatigueTable").classList.toggle("hidden", !fatigue);
+  if (!fatigue) {
+    setText("#coachingFatigueCopy", `Comparing the start of a session with its end needs at least ${number(coaching.options.minimumRidingSecondsForFatigue / 60)} minutes of riding.`);
+    $("#coachingFatigueBody").replaceChildren();
+    return;
+  }
+  const sentences = [fatigue.drop
+    ? `Riding speed dropped by ${formatShare(fatigue.drop.speedDrop)} from ${formatTime(fatigue.drop.timestamp)} and did not come back. That can be fatigue or dropping wind.`
+    : `No lasting drop in riding speed${fatigue.speedChange === null ? "." : `: the last quarter was ${fatigue.speedChange >= 0 ? "+" : "−"}${formatShare(Math.abs(fatigue.speedChange))} against the first.`}`];
+  if (fatigue.heartRateDrift !== null) sentences.push(`Heart rate while riding ${fatigue.heartRateDrift >= 0 ? "rose" : "fell"} ${number(Math.abs(fatigue.heartRateDrift), 0)} bpm from the first quarter to the last.`);
+  if (fatigue.heartRateRecovery) {
+    const recovery = fatigue.heartRateRecovery;
+    sentences.push(`In the first ${number(recovery.seconds)} seconds of a longer stop it ${recovery.beatsPerMinute >= 0 ? "fell" : "rose"} by a median of ${number(Math.abs(recovery.beatsPerMinute), 0)} bpm (${number(recovery.stopCount)} ${recovery.stopCount === 1 ? "stop" : "stops"}).`);
+  }
+  setText("#coachingFatigueCopy", sentences.join(" "));
+  $("#coachingFatigueBody").replaceChildren(...fatigue.quarters.map((quarter) => {
+    const row = element("tr", fatigue.drop && quarter.number >= fatigue.drop.quarter ? "coaching-row-mark" : "");
+    const name = element("td", "", `Quarter ${quarter.number}`);
+    name.append(element("small", "", `${formatTime(quarter.startTimestamp)} – ${formatTime(quarter.endTimestamp)}${fatigue.drop?.quarter === quarter.number ? " · speed dropped here" : ""}`));
+    row.append(
+      name,
+      element("td", "is-number", formatSpeed(quarter.medianSpeed)),
+      element("td", "is-number", quarter.turns.attempted ? `${number(quarter.turns.made)} of ${number(quarter.turns.attempted)}` : "—"),
+      element("td", "is-number", formatShare(quarter.turns.medianSpeedKept)),
+      element("td", "is-number", number(quarter.stopCount)),
+      element("td", "is-number", quarter.averageHeartRate === null ? "—" : `${number(quarter.averageHeartRate, 0)} bpm`),
+    );
+    return row;
+  }));
+}
+
+function renderCoachingBests(coaching) {
+  const bests = coaching.personalBests;
+  $("#coachingBestStats").replaceChildren(
+    statTile("Best 10 seconds", formatSpeed(bests.tenSeconds?.speed), bests.tenSeconds ? `at ${formatTime(bests.tenSeconds.timestamp)}` : "not enough data"),
+    statTile("Best 100 m", formatSpeed(bests.hundredMetres?.speed), bests.hundredMetres ? `in ${number(bests.hundredMetres.seconds, 0)} s` : "not enough data"),
+    statTile("Best 500 m", formatSpeed(bests.fiveHundredMetres?.speed), bests.fiveHundredMetres ? `in ${formatSeconds(bests.fiveHundredMetres.seconds)}` : "not enough data"),
+    statTile("Longest leg", formatDistance(bests.longestLeg?.distance), bests.longestLeg ? `${formatSeconds(bests.longestLeg.seconds)} at ${formatSpeed(bests.longestLeg.averageSpeed)}` : "no legs found"),
+    statTile("Longest ride, no stop", formatSeconds(bests.longestRide?.seconds), bests.longestRide ? `${formatDistance(bests.longestRide.distance)} at ${formatSpeed(bests.longestRide.averageSpeed)}` : "no riding found"),
+  );
+}
+
+function renderCoaching(summary) {
+  const coaching = coachingFor(summary);
+  setText("#coachingActivityTitle", sessionTitle(summary));
+  setText("#coachingActivityDate", formatDate(summary.starts));
+  $("#coachingUnavailable").classList.toggle("hidden", coaching.available);
+  $("#coachingSections").classList.toggle("hidden", !coaching.available);
+  if (!coaching.available) return;
+  renderCoachingTakeaways(coaching);
+  renderCoachingTurns(coaching);
+  renderCoachingSides(coaching);
+  renderCoachingStops(coaching, summary);
+  renderCoachingUpwind(coaching, summary.wind);
+  renderCoachingFatigue(coaching);
+  renderCoachingBests(coaching);
+}
+
+function bindCoachingInteractions() {
+  // The pointer only has to be near a turn, not exactly on it.
+  coachingTurnCanvas.addEventListener("pointermove", (event) => {
+    const { x, y } = canvasPointerPosition(coachingTurnCanvas, event);
+    const nearest = coachingRenderState.marks.reduce((best, mark) => {
+      const distance = Math.hypot(mark.x - x, mark.y - y);
+      return distance < 28 && (!best || distance < best.distance) ? { mark, distance } : best;
+    }, null)?.mark ?? null;
+    if ((nearest?.turn ?? null) === coachingRenderState.hoveredTurn) return;
+    coachingRenderState.hoveredTurn = nearest?.turn ?? null;
+    drawTurnChart(coachingRenderState.coaching);
+    showTurnTooltip(nearest);
+  });
+  coachingTurnCanvas.addEventListener("pointerleave", () => {
+    if (!coachingRenderState.hoveredTurn) return;
+    coachingRenderState.hoveredTurn = null;
+    drawTurnChart(coachingRenderState.coaching);
+    showTurnTooltip(null);
+  });
+}
+
 function activePage() {
   const page = window.location.hash.slice(1);
-  return ["overview", "speed-effort", "ride-segments"].includes(page) ? page : "overview";
+  return ["overview", "speed-effort", "ride-segments", "coaching"].includes(page) ? page : "overview";
 }
 
 function updatePage() {
@@ -1226,7 +1636,8 @@ function updatePage() {
   const overviewActive = page === "overview";
   const analysisActive = page === "speed-effort";
   const segmentsActive = page === "ride-segments";
-  setText("#pageLabel", overviewActive ? "overview" : analysisActive ? "session overview" : "ride segments");
+  const coachingActive = page === "coaching";
+  setText("#pageLabel", overviewActive ? "overview" : analysisActive ? "session overview" : segmentsActive ? "ride segments" : "coaching");
   document.querySelectorAll("[data-page]").forEach((link) => link.classList.toggle("active", link.dataset.page === page));
   overviewIntro.classList.toggle("hidden", !overviewActive);
   emptyState.classList.toggle("hidden", !overviewActive || Boolean(currentActivity));
@@ -1237,6 +1648,9 @@ function updatePage() {
   rideSegmentsPage.classList.toggle("hidden", !segmentsActive);
   rideSegmentsEmpty.classList.toggle("hidden", Boolean(currentActivity) || !segmentsActive);
   rideSegmentsBody.classList.toggle("hidden", !currentActivity || !segmentsActive);
+  coachingPage.classList.toggle("hidden", !coachingActive);
+  coachingEmpty.classList.toggle("hidden", Boolean(currentActivity) || !coachingActive);
+  coachingBody.classList.toggle("hidden", !currentActivity || !coachingActive);
   if (currentActivity) scheduleVisualRender();
 }
 
@@ -1248,6 +1662,7 @@ function scheduleVisualRender() {
     const page = activePage();
     if (page === "speed-effort") renderAnalysis(currentActivity);
     else if (page === "ride-segments") renderRideSegments(currentActivity);
+    else if (page === "coaching") renderCoaching(currentActivity);
     else renderCharts(currentActivity);
   });
 }
@@ -1368,6 +1783,7 @@ function render(activity, fileName) {
   analysisSelectionIndex = null;
   selectedSegmentIndex = null;
   segmentRenderState = { map: null };
+  coachingRenderState = { marks: [], hoveredTurn: null, coaching: null };
   analysisMapFocus = null;
   updateCoachingFocusUI();
   const summary = currentActivity;
@@ -1462,6 +1878,7 @@ input.addEventListener("change", () => {
 $("#newFileButton").addEventListener("click", () => input.click());
 $("#analysisLoadButton").addEventListener("click", () => input.click());
 $("#segmentsLoadButton").addEventListener("click", () => input.click());
+$("#coachingLoadButton").addEventListener("click", () => input.click());
 $("#dismissError").addEventListener("click", hideError);
 inventoryToggle.addEventListener("click", () => {
   const expanded = inventoryToggle.getAttribute("aria-expanded") === "true";
@@ -1499,6 +1916,7 @@ window.addEventListener("resize", () => {
 
 bindAnalysisInteractions();
 bindSegmentInteractions();
+bindCoachingInteractions();
 bindMapPanning(analysisMapCanvas, analysisMapTiles);
 bindMapPanning(segmentsMapCanvas, segmentsMapTiles);
 

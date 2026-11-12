@@ -19,7 +19,7 @@ function finite(value) {
   return typeof value === "number" && Number.isFinite(value);
 }
 
-function median(values) {
+export function median(values) {
   if (!values.length) return null;
   const sorted = [...values].sort((a, b) => a - b);
   const middle = Math.floor(sorted.length / 2);
@@ -168,7 +168,7 @@ function recordRanges(selected, maximumIntervalSeconds) {
   return ranges;
 }
 
-function distanceBetween(start, end) {
+export function distanceBetween(start, end) {
   const latitude = (end.latitude - start.latitude) * Math.PI / 180;
   const longitude = (end.longitude - start.longitude) * Math.PI / 180;
   const startLatitude = start.latitude * Math.PI / 180;
@@ -177,7 +177,7 @@ function distanceBetween(start, end) {
   return 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(Math.max(0, 1 - a)));
 }
 
-function bearingBetween(start, end) {
+export function bearingBetween(start, end) {
   const startLatitude = start.latitude * Math.PI / 180;
   const endLatitude = end.latitude * Math.PI / 180;
   const longitude = (end.longitude - start.longitude) * Math.PI / 180;
@@ -187,7 +187,7 @@ function bearingBetween(start, end) {
   return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
 }
 
-function angleDifference(from, to) {
+export function angleDifference(from, to) {
   return Math.abs(((to - from + 540) % 360) - 180);
 }
 

@@ -3,36 +3,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createDemoActivity } from "../public/demo-session.js";
 import { segmentTrack } from "../public/track-segmentation.js";
-
-const START = 1_000_000;
-const METRES_PER_DEGREE = 111320;
-
-// phases: [{ seconds, speed (m/s), heading (degrees) }], sampled once per second from a made-up origin.
-function syntheticTrack(phases) {
-  const records = [];
-  let north = 0;
-  let east = 0;
-  let second = 0;
-  phases.forEach(({ seconds, speed, heading = 0 }) => {
-    for (let step = 0; step < seconds; step += 1) {
-      records.push({
-        fields: {
-          timestamp: START + second,
-          enhanced_speed: speed,
-          position_lat: north / METRES_PER_DEGREE,
-          position_long: east / METRES_PER_DEGREE,
-        },
-      });
-      north += speed * Math.cos(heading * Math.PI / 180);
-      east += speed * Math.sin(heading * Math.PI / 180);
-      second += 1;
-    }
-  });
-  return records;
-}
+import { START, near, syntheticTrack } from "../test-helpers/synthetic-track.mjs";
 
 const offsets = (section) => [section.startTimestamp - START, section.endTimestamp - START];
-const near = (actual, expected, tolerance, message) => assert.ok(Math.abs(actual - expected) <= tolerance, `${message}: expected ${expected} ± ${tolerance}, got ${actual}`);
 
 test("places section boundaries within a few seconds of the speed change", () => {
   const { activeSections, sections } = segmentTrack(syntheticTrack([

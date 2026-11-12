@@ -25,7 +25,7 @@
            <a class="nav-item" href="#speed-effort" data-page="speed-effort"><span class="nav-index">02</span>Session overview</a>
            <span class="nav-item disabled"><span class="nav-index">03</span>Track &amp; water<small>soon</small></span>
            <a class="nav-item" href="#ride-segments" data-page="ride-segments"><span class="nav-index">04</span>Ride segments</a>
-           <span class="nav-item disabled"><span class="nav-index">05</span>Coaching &amp; Growth<small>soon</small></span>
+           <a class="nav-item" href="#coaching" data-page="coaching"><span class="nav-index">05</span>Coaching &amp; Growth</a>
         </nav>
 
         <div class="sidebar-bottom">
@@ -339,6 +339,117 @@
               </section>
             </div>
 
+          </div>
+        </section>
+
+        <section class="coaching-page hidden" id="coachingPage" aria-live="polite">
+          <div class="analysis-hero">
+            <div>
+              <p class="section-number">Ride lab / 05</p>
+              <h1>Coach the <em>next session.</em></h1>
+              <p class="intro-copy">Turns, stops, both riding directions, and how the session held up over time, worked out from GPS and speed.</p>
+            </div>
+            <div class="analysis-instruction panel">
+              <span class="analysis-instruction-number">01</span>
+              <div><strong>Start with the takeaways</strong><p>They are picked by rule from the numbers below. Hover a turn in the chart to see what it cost.</p></div>
+            </div>
+          </div>
+
+          <section class="analysis-empty panel" id="coachingEmpty">
+            <p class="empty-kicker">Coaching needs a ride</p>
+            <h2>Load a session to see<br /><span>what to work on.</span></h2>
+            <p>Turn quality, side balance, stops, and fatigue are worked out in the browser from the track. The FIT stays local.</p>
+            <button class="button button-primary" id="coachingLoadButton" type="button">Choose FIT file <span class="button-icon">+</span></button>
+          </section>
+
+          <div class="coaching-body hidden" id="coachingBody">
+            <div class="analysis-session panel">
+              <div>
+                <p class="panel-kicker">Session in focus</p>
+                <h2 id="coachingActivityTitle">Kite-surf session</h2>
+                <p id="coachingActivityDate">Date not available</p>
+              </div>
+              <div class="analysis-session-tag"><span class="pulse-dot"></span>from gps and speed</div>
+            </div>
+
+            <section class="analysis-empty panel hidden" id="coachingUnavailable">
+              <p class="empty-kicker">Nothing to coach yet</p>
+              <h2>No riding was found<br /><span>in this session.</span></h2>
+              <p>Coaching needs at least one stretch of sustained riding speed. Check the ride segments page to see what was detected.</p>
+            </section>
+
+            <div class="coaching-sections" id="coachingSections">
+              <section class="coaching-panel panel">
+                <div class="panel-heading"><div><p class="panel-kicker">Session takeaways</p><h3>What stood out</h3></div><span class="panel-index">RULE-BASED</span></div>
+                <div class="coaching-takeaways" id="coachingTakeaways"></div>
+              </section>
+
+              <section class="coaching-panel panel">
+                <div class="panel-heading"><div><p class="panel-kicker">Turn quality</p><h3>Speed kept through each turn</h3></div><span class="chart-unit">% of entry speed</span></div>
+                <p class="coaching-copy" id="coachingTurnCopy"></p>
+                <div class="segments-stat-grid" id="coachingTurnStats"></div>
+                <div class="coaching-legend" id="coachingTurnLegend"></div>
+                <div class="coaching-chart-wrap" id="coachingTurnChartWrap">
+                  <canvas id="coachingTurnChart" aria-label="Speed kept through each turn over the session"></canvas>
+                  <div class="coaching-tooltip hidden" id="coachingTurnTooltip" role="status"></div>
+                  <div class="chart-empty hidden" id="coachingTurnEmpty">No turns were found in this session</div>
+                </div>
+                <details class="coaching-details">
+                  <summary>Show every turn as a table</summary>
+                  <div class="coaching-table-scroll">
+                    <table class="coaching-table">
+                      <thead><tr><th>Time</th><th>Turned onto</th><th>Result</th><th class="is-number">Entry speed</th><th class="is-number">Slowest</th><th class="is-number">Speed kept</th><th class="is-number">Back to speed</th></tr></thead>
+                      <tbody id="coachingTurnTableBody"></tbody>
+                    </table>
+                  </div>
+                </details>
+              </section>
+
+              <div class="coaching-columns">
+                <section class="coaching-panel panel">
+                  <div class="panel-heading"><div><p class="panel-kicker">Side balance</p><h3>One direction against the other</h3></div></div>
+                  <p class="coaching-copy">Legs are grouped by the two directions you reach in. A clear gap between the columns points to a weaker side.</p>
+                  <table class="coaching-table coaching-side-table" id="coachingSideTable"></table>
+                </section>
+
+                <section class="coaching-panel panel">
+                  <div class="panel-heading"><div><p class="panel-kicker">Stops and restarts</p><h3>Time off the board</h3></div></div>
+                  <p class="coaching-copy" id="coachingStopCopy"></p>
+                  <div class="segments-stat-grid coaching-stat-grid-2" id="coachingStopStats"></div>
+                </section>
+              </div>
+
+              <section class="coaching-panel panel">
+                <div class="panel-heading"><div><p class="panel-kicker">Upwind performance</p><h3>Angle to the wind and ground gained</h3></div><span class="chart-unit" id="coachingUpwindSource"></span></div>
+                <p class="coaching-copy" id="coachingUpwindCopy"></p>
+                <div class="segments-stat-grid" id="coachingUpwindStats"></div>
+                <details class="coaching-details" id="coachingUpwindSections">
+                  <summary>Show ground gained in each ride section</summary>
+                  <div class="coaching-table-scroll">
+                    <table class="coaching-table">
+                      <thead><tr><th>Ride section</th><th class="is-number">Legs measured</th><th class="is-number">Ground gained upwind</th></tr></thead>
+                      <tbody id="coachingUpwindSectionBody"></tbody>
+                    </table>
+                  </div>
+                </details>
+              </section>
+
+              <section class="coaching-panel panel">
+                <div class="panel-heading"><div><p class="panel-kicker">Fatigue over the session</p><h3>Four quarters of equal riding time</h3></div></div>
+                <p class="coaching-copy" id="coachingFatigueCopy"></p>
+                <div class="coaching-table-scroll">
+                  <table class="coaching-table" id="coachingFatigueTable">
+                    <thead><tr><th>Quarter</th><th class="is-number">Riding speed</th><th class="is-number">Turns made</th><th class="is-number">Speed kept in turns</th><th class="is-number">Stops</th><th class="is-number">Heart rate</th></tr></thead>
+                    <tbody id="coachingFatigueBody"></tbody>
+                  </table>
+                </div>
+              </section>
+
+              <section class="coaching-panel panel">
+                <div class="panel-heading"><div><p class="panel-kicker">Personal bests</p><h3>Best efforts in this session</h3></div></div>
+                <div class="segments-stat-grid coaching-stat-grid-5" id="coachingBestStats"></div>
+              </section>
+            </div>
           </div>
         </section>
 

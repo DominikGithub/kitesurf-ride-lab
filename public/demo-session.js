@@ -152,9 +152,11 @@ function simulateSession() {
 
   // A transition: brake on the old course, swing the board through downwind, then accelerate away.
   // Most are slow sliding turns; some are carved and keep more speed through a wider arc.
+  // The rider is weaker turning back towards the beach: fewer carved turns and less speed kept.
   function turn(leg, next) {
-    const carved = random.uniform() < 0.3;
-    const slowest = carved ? random.between(3.2, 4.5) : random.between(1.6, 2.6);
+    const weakSide = next.tack === -1;
+    const carved = random.uniform() < (weakSide ? 0.12 : 0.42);
+    const slowest = carved ? random.between(3.2, 4.5) : weakSide ? random.between(1.5, 2.1) : random.between(2.2, 3.2);
     const brakeSeconds = Math.round(random.between(1, 3));
     for (let step = 0; step < brakeSeconds; step += 1) {
       tick(slowest + 1, windDirectionAt(rider.second) + leg.tack * (leg.offWind + 8), rideEffort(leg.offWind), { braking: 2.2 });
@@ -226,7 +228,8 @@ function simulateSession() {
     while (!finished()) {
       if (sail(leg, end)) return;
       const next = planLeg(-leg.tack, phase, end);
-      if (random.uniform() < 0.07) crash();
+      // Turns back towards the beach go wrong far more often than turns out to sea.
+      if (random.uniform() < (next.tack === -1 ? 0.25 : 0.03)) crash();
       else turn(leg, next);
       leg = next;
     }
