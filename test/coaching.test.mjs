@@ -69,6 +69,39 @@ test("separates long breaks from stops and leaves them out of time on board", ()
   near(result.personalBests.longestRide.distance, 2100, 80, "longest ride distance");
 });
 
+test("counts a fall with a failed restart as one stop", () => {
+  const down = { seconds: 20, speed: 0.3, heading: 170 };
+  const result = coach([beach, leg(EAST), down, { seconds: 5, speed: 5, heading: EAST }, { seconds: 15, speed: 0.3, heading: 170 }, leg(WEST), beach]);
+  assert.equal(result.stops.length, 1);
+  assert.equal(result.stops[0].failedRestarts, 1);
+  assert.equal(result.stops[0].context, "turn");
+  near(result.stops[0].restartSeconds, 40, 6, "time from the fall to riding again");
+  assert.equal(result.stopSummary.stopCount, 1);
+  assert.equal(result.stopSummary.failedRestarts, 1);
+  // A real ride between two falls keeps them apart.
+  const apart = coach([beach, leg(EAST), down, leg(EAST, 7, 30), down, leg(WEST), beach]);
+  assert.equal(apart.stops.length, 2);
+  assert.equal(apart.stopSummary.failedRestarts, 0);
+});
+
+test("reads the course from after a turn when the rider stops soon after it", () => {
+  // The 20 seconds before the stop run through a turn; the last 10 seconds are a straight line heading west.
+  const result = coach([beach, leg(EAST), { seconds: 3, speed: 2.8, heading: 170 }, leg(WEST, 7, 14), { seconds: 18, speed: 0.3, heading: 170 }, leg(WEST), beach]);
+  const stop = result.stops.find((entry) => entry.kind === "stop");
+  near(stop.courseBefore, WEST, 5, "course before the stop");
+  assert.equal(stop.context, "leg");
+});
+
+test("places turns and stops on the track, even when GPS drops out", () => {
+  const result = coach([beach, leg(EAST), { seconds: 3, speed: 2.8, heading: 170 }, leg(WEST), { seconds: 18, speed: 0.3, heading: 170, gps: false }, leg(EAST), beach]);
+  const [made, stopped] = result.turns;
+  assert.equal(made.outcome, "made");
+  assert.equal(stopped.outcome, "stopped");
+  near(made.position.longitude * 111320, 7 * 90, 30, "made turn sits at the end of the first leg");
+  near(stopped.position.longitude * 111320, 0, 40, "stopped turn sits at the last fix before the stop");
+  assert.deepEqual(stopped.position, result.stops[0].position);
+});
+
 test("compares the two riding directions", () => {
   const result = coach([beach, leg(EAST, 8), leg(WEST, 6), leg(EAST, 8), leg(WEST, 6), leg(EAST, 8), leg(WEST, 6), beach]);
   const east = result.sideBalance.find((side) => side.label === "E");
@@ -128,6 +161,10 @@ test("finds the demo rider's weak side", () => {
   assert.ok(southWest.turns.successRate < northEast.turns.successRate);
   assert.ok(southWest.turns.medianSpeedKept < northEast.turns.medianSpeedKept);
   assert.equal(result.takeaways.length, 3);
-  assert.ok(result.takeaways.some((takeaway) => takeaway.title.includes("SW")), JSON.stringify(result.takeaways));
+  assert.equal(result.takeaways[0].title, "Turns onto SW are your weak side");
+  // No two takeaways say the same thing, and one of them is about something that went well.
+  assert.equal(new Set(result.takeaways.map((takeaway) => takeaway.group)).size, 3);
+  assert.equal(result.takeaways.filter((takeaway) => takeaway.title.includes("SW")).length, 1);
+  assert.equal(result.takeaways.at(-1).tone, "strength");
   assert.ok(result.stopSummary.boardShareOfWater > 0.7 && result.stopSummary.boardShareOfWater < 1);
 });

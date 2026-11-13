@@ -36,6 +36,18 @@ const PLAN = [
   { type: "beach" },
 ];
 
+// What makes one simulated rider differ from another. The defaults are the documentation session.
+const DEFAULT_RIDER = Object.freeze({
+  seed: SEED,
+  startTime: START_TIME,
+  speedFactor: 1,
+  carvedShareStrong: 0.42,
+  carvedShareWeak: 0.12,
+  crashInTurnStrong: 0.03,
+  crashInTurnWeak: 0.25,
+  crashPerSecond: 1 / 1100,
+});
+
 const HEART_RATE = { standing: 99, walking: 110, riding: 132, swimming: 142, sessionDrift: 12 };
 const HEART_RATE_ZONE_LIMITS = [111, 130, 148, 167];
 
@@ -77,8 +89,8 @@ function boardSpeed(offWind) {
   return offWind <= 90 ? 7.5 - (90 - offWind) * 0.05 : 7.5 + Math.min(offWind - 90, 30) * 0.035;
 }
 
-function simulateSession() {
-  const random = createRandom(SEED);
+function simulateSession(profile) {
+  const random = createRandom(profile.seed);
   const offshore = unitVector(SHORE_BEARING + 90);
   const upwind = unitVector(PREVAILING_WIND);
   const rider = { second: 0, east: 0, north: 0, speed: 0, heartRate: 92, distance: 0 };
@@ -155,7 +167,7 @@ function simulateSession() {
   // The rider is weaker turning back towards the beach: fewer carved turns and less speed kept.
   function turn(leg, next) {
     const weakSide = next.tack === -1;
-    const carved = random.uniform() < (weakSide ? 0.12 : 0.42);
+    const carved = random.uniform() < (weakSide ? profile.carvedShareWeak : profile.carvedShareStrong);
     const slowest = carved ? random.between(3.2, 4.5) : weakSide ? random.between(1.5, 2.1) : random.between(2.2, 3.2);
     const brakeSeconds = Math.round(random.between(1, 3));
     for (let step = 0; step < brakeSeconds; step += 1) {
@@ -210,9 +222,9 @@ function simulateSession() {
       noise.gust = 0.97 * noise.gust + 0.02 * random.normal();
       const course = offWind + noise.course;
       const fatigue = 1 - 0.06 * rider.second / SESSION_SECONDS;
-      const speed = boardSpeed(course) * (1 + clamp(noise.gust, -0.2, 0.2)) * fatigue;
+      const speed = boardSpeed(course) * (1 + clamp(noise.gust, -0.2, 0.2)) * fatigue * profile.speedFactor;
       tick(Math.min(speed, speedLimit), wind + leg.tack * course, rideEffort(course));
-      if (speedLimit === Infinity && random.uniform() < 1 / 1100) crash();
+      if (speedLimit === Infinity && random.uniform() < profile.crashPerSecond) crash();
     }
     return true;
   }
@@ -229,7 +241,7 @@ function simulateSession() {
       if (sail(leg, end)) return;
       const next = planLeg(-leg.tack, phase, end);
       // Turns back towards the beach go wrong far more often than turns out to sea.
-      if (random.uniform() < (next.tack === -1 ? 0.25 : 0.03)) crash();
+      if (random.uniform() < (next.tack === -1 ? profile.crashInTurnWeak : profile.crashInTurnStrong)) crash();
       else turn(leg, next);
       leg = next;
     }
@@ -267,8 +279,10 @@ function messageTypes(messages) {
   return [...counts.values()];
 }
 
-export function createDemoActivity() {
-  const samples = simulateSession();
+export function createDemoActivity(riderProfile = {}) {
+  const profile = { ...DEFAULT_RIDER, ...riderProfile };
+  const START_TIME = profile.startTime;
+  const samples = simulateSession(profile);
   const longitudeScale = METRES_PER_DEGREE * Math.cos(GEAR_SPOT.latitude * Math.PI / 180);
   const records = samples.map((sample) => demoMessage(20, "record", {
     timestamp: START_TIME + sample.second,
@@ -361,4 +375,26 @@ export function createDemoActivity() {
     messageTypes: messageTypes(messages),
     messageCounts: new Map(messageTypes(messages).map((type) => [type.globalNumber, type.count])),
   };
+}
+
+// A made-up season for the progress page: six sessions of a rider who gets faster, carves more turns
+// and falls less, with one bad day in between. Seeded, so it is the same on every load.
+export function createDemoSeries() {
+  const days = [[4, 24], [5, 7], [5, 21], [6, 4], [6, 18], [7, 2]];
+  return days.map(([month, day], index) => {
+    const form = index === 3 ? 0.3 : index / (days.length - 1);
+    return {
+      fileName: `synthetic-session-${index + 1}.fit`,
+      activity: createDemoActivity({
+        seed: SEED + 101 * (index + 1),
+        startTime: Math.floor((Date.UTC(2025, month, day, 13, 30) - FIT_EPOCH_MS) / 1000),
+        speedFactor: 0.86 + 0.16 * form,
+        carvedShareStrong: 0.15 + 0.4 * form,
+        carvedShareWeak: 0.03 + 0.2 * form,
+        crashInTurnStrong: 0.12 - 0.1 * form,
+        crashInTurnWeak: 0.5 - 0.36 * form,
+        crashPerSecond: (1 - form) / 500 + form / 1500,
+      }),
+    };
+  });
 }

@@ -1,4 +1,4 @@
-# Kitesurf .fit File Data Session Analytics 
+# Kitesurf .fit File Session Analytics 
 
 A web dashboard for exploring a sport `.fit` formated file data export. This app is specifically tailored to analyse kite surf sessions. It was designed and tested with Suunto `.fit` generated data, but generally works with any `.fit` compatible files from other manufacturers like Garmin, etc.
 
@@ -41,13 +41,24 @@ Automatically detected session segments along the recorded track with statistic 
 
 Turns the detected legs into things to work on. Everything is worked out in the browser from timestamps, speed, heart rate and GPS; only the upwind figures need a wind direction.
 
-- **Session takeaways:** up to three rule-based observations, such as a weaker turning side or where most stops happen.
-- **Turn quality:** for every turn between two legs, the share of entry speed kept, the time to get back to speed, and whether the turn ended in a stop. Hover a turn in the chart for its details, or open the table below it.
+- **Session takeaways:** up to three rule-based observations that do not repeat each other, such as a weaker turning side or where most stops happen, with one slot kept for something that went well.
+- **Turn quality:** for every turn between two legs, the share of entry speed kept, the time to get back to speed, and whether the turn ended in a stop. Every turn is also marked on a map beside the chart: hover a turn in either one to find it in the other and see the stretch ridden into and out of it. A table of all turns is below.
 - **Side balance:** legs, speed, turn success and mid-leg stops for one riding direction against the other.
-- **Stops and restarts:** number of stops, whether they came in a turn or mid-leg, typical restart time, and the share of water time spent on the board. Stops longer than two minutes count as breaks.
+- **Stops and restarts:** number of stops, whether they came in a turn or mid-leg, typical restart time, and the share of water time spent on the board. Getting up for a few seconds and going down again counts as a failed restart of the same stop. Stops longer than two minutes count as breaks.
 - **Upwind performance:** angle to the wind per direction, best upwind progress, and ground gained or lost, also per ride section. These figures are only as accurate as the wind direction, and modelled hourly wind is approximate.
 - **Fatigue over the session:** riding speed, turn quality, stops and heart rate across four quarters of equal riding time, with the point where speed dropped for good marked. Needs at least 20 minutes of riding.
 - **Personal bests:** best speed over 10 seconds, 100 m and 500 m, the longest leg, and the longest ride without a stop.
+
+### Progress
+
+![Progress page following five measures across a synthetic season of six rides](docs/progress-demo.png)
+
+Compares several rides over time. Choose as many `.fit` files as you like at once (or drop them on the page); each ride is reduced to a few measures and shown as one small chart per measure, with the rides in date order.
+
+- **Shown to start with:** riding speed, longest ride without a stop, turns made, speed kept in turns, and time on the board.
+- **More under Measures:** best 10 seconds and 500 m, time and distance ridden, typical leg length, time back to speed after a turn, the gap between your two sides, stops per hour, typical restart, heart rate while riding, and three upwind measures.
+- **Reading it:** each chart says whether the measure got better or worse since the first ride. Hover a chart or a table row to read the same ride in every chart, and open any ride from the table to see it in full on the other pages.
+- **Upwind measures** look up the wind for every ride, and only once you switch one of them on.
 
 ## Privacy
 
@@ -55,6 +66,7 @@ Turns the detected legs into things to work on. Everything is worked out in the 
 - The .FIT file and derived activity data are held only in the current page's memory. The app does not write them to local storage, IndexedDB, cookies, or an account. Reloading or closing the tab clears the current activity.
 - When a GPS track is visible, your browser requests the required OpenStreetMap tiles based on track GPS location.
 - Wind data is loaded from OpenMeteo using the GPS coordinates and the session's UTC start/end timestamps.
+- On the Progress page only the measures of each ride are kept in memory, and the wind is looked up for those rides only after you switch on an upwind measure.
 
 ## Run
 

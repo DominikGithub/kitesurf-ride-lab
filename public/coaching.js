@@ -10,8 +10,15 @@ export const DEFAULT_COACHING_OPTIONS = Object.freeze({
   entryWindowSeconds: 15,
   recoveryShare: 0.85,
   recoveryLimitSeconds: 60,
-  courseWindowSeconds: 20,
+  // Getting up, riding a few seconds and going down again is one stop with a failed restart, not two stops.
+  minimumRideSeconds: 12,
+  // The course before and after a stop is read from a straight stretch next to it. The usual window is tried
+  // first, then a shorter one (the rider had only just turned), then longer ones (few GPS fixes).
+  courseWindowsSeconds: Object.freeze([20, 10, 40, 60]),
   minimumCourseMetres: 25,
+  minimumCourseStraightness: 0.7,
+  // A turn or stop is placed on the map at the nearest GPS fix within this many seconds.
+  fixSeconds: 15,
   minimumLegSeconds: 15,
   minimumUpwindLegMetres: 100,
   minimumRidingSecondsForFatigue: 1200,
@@ -105,19 +112,49 @@ function buildTrack(records, maximumIntervalSeconds) {
   };
 }
 
-// Course over ground between two moments, or null when the rider barely moved.
-function courseBetween(track, from, to, minimumMetres) {
+// Course over ground between two moments, or null when the rider barely moved or did not hold a line
+// (a stretch that runs through a turn says nothing about the course).
+function courseBetween(track, from, to, options) {
   const [first, last] = track.range(from, to);
   let start = null;
   let end = null;
+  let pathMetres = 0;
   for (let position = first; position < last; position += 1) {
     const record = track.timed[position];
     if (!record.position) continue;
     start ??= record.position;
+    if (end) pathMetres += distanceBetween(end, record.position);
     end = record.position;
   }
-  if (!start || end === start || distanceBetween(start, end) < minimumMetres) return null;
+  if (!start || end === start) return null;
+  const straightMetres = distanceBetween(start, end);
+  if (straightMetres < options.minimumCourseMetres || straightMetres < pathMetres * options.minimumCourseStraightness) return null;
   return bearingBetween(start, end);
+}
+
+// Course just before (direction -1) or just after (direction 1) a moment, never looking past the limit.
+function courseBeside(track, moment, direction, limit, options) {
+  const tried = new Set();
+  for (const seconds of options.courseWindowsSeconds) {
+    const edge = direction < 0 ? Math.max(limit, moment - seconds) : Math.min(limit, moment + seconds);
+    if (tried.has(edge)) continue;
+    tried.add(edge);
+    const course = direction < 0 ? courseBetween(track, edge, moment, options) : courseBetween(track, moment, edge, options);
+    if (course !== null) return course;
+  }
+  return null;
+}
+
+// The record with a GPS position closest to a moment: the last one before it, or failing that the first after it.
+function fixNear(track, timestamp, limitSeconds) {
+  const from = track.positionAtOrAfter(timestamp);
+  for (let position = Math.min(from, track.timed.length - 1); position >= 0 && timestamp - track.times[position] <= limitSeconds; position -= 1) {
+    if (track.times[position] <= timestamp && track.timed[position].position) return track.timed[position];
+  }
+  for (let position = from; position < track.timed.length && track.times[position] - timestamp <= limitSeconds; position += 1) {
+    if (track.timed[position].position) return track.timed[position];
+  }
+  return null;
 }
 
 // A stop is any stretch below riding speed that includes real standing still (or a recording pause).
@@ -159,17 +196,35 @@ function detectStops(track, windowStart, windowEnd, speeds, options) {
   }
   if (current) close(windowEnd);
 
+  // Join stops that have only a few seconds of riding between them.
+  const joined = [];
+  stops.forEach((stop) => {
+    const previous = joined.at(-1);
+    if (!previous || stop.startTimestamp - previous.endTimestamp >= options.minimumRideSeconds) {
+      joined.push({ ...stop, failedRestarts: 0 });
+      return;
+    }
+    previous.endTimestamp = stop.endTimestamp;
+    previous.stillSeconds += stop.stillSeconds;
+    previous.longestStill = Math.max(previous.longestStill, stop.longestStill);
+    previous.paused ||= stop.paused;
+    previous.failedRestarts += 1;
+  });
+  stops.splice(0, stops.length, ...joined);
+
   return stops.map((stop, index) => {
     const previousEnd = index ? stops[index - 1].endTimestamp : windowStart;
     const nextStart = stops[index + 1]?.startTimestamp ?? windowEnd;
-    const courseBefore = courseBetween(track, Math.max(previousEnd, stop.startTimestamp - options.courseWindowSeconds), stop.startTimestamp, options.minimumCourseMetres);
-    const courseAfter = courseBetween(track, stop.endTimestamp, Math.min(nextStart, stop.endTimestamp + options.courseWindowSeconds), options.minimumCourseMetres);
+    const courseBefore = courseBeside(track, stop.startTimestamp, -1, previousEnd, options);
+    const courseAfter = courseBeside(track, stop.endTimestamp, 1, nextStart, options);
     const restartSeconds = stop.endTimestamp - stop.startTimestamp;
     return {
       startTimestamp: stop.startTimestamp,
       endTimestamp: stop.endTimestamp,
+      position: fixNear(track, stop.startTimestamp, options.fixSeconds)?.position ?? null,
       restartSeconds,
       stillSeconds: Math.min(stop.stillSeconds, restartSeconds),
+      failedRestarts: stop.failedRestarts,
       paused: stop.paused,
       kind: restartSeconds >= options.breakSeconds ? "break" : "stop",
       // The rider came out of the stop going the other way: it happened in a turn.
@@ -239,6 +294,7 @@ function measureTurn(track, previousLeg, nextLeg, speeds, options) {
     outcome: "made",
     timestamp: slowestTime,
     recordIndex: track.timed[slowest].index,
+    position: fixNear(track, slowestTime, options.fixSeconds)?.position ?? null,
     entrySpeed,
     slowestSpeed,
     speedLost: entrySpeed - slowestSpeed,
@@ -264,6 +320,7 @@ function collectTurns(track, sections, stops, sideOf, speeds, options) {
       outcome: "stopped",
       timestamp: stop.startTimestamp,
       recordIndex: track.timed[Math.min(track.positionAtOrAfter(stop.startTimestamp), track.timed.length - 1)].index,
+      position: stop.position,
       entrySpeed: null,
       slowestSpeed: null,
       speedLost: null,
@@ -338,6 +395,7 @@ function summarizeStops(track, stops, windowStart, windowEnd) {
     stopsUnclear: shortStops.filter((stop) => stop.context === "unclear").length,
     medianRestartSeconds: median(shortStops.map((stop) => stop.restartSeconds)),
     longestRestartSeconds: shortStops.length ? Math.max(...shortStops.map((stop) => stop.restartSeconds)) : null,
+    failedRestarts: sum(shortStops.map((stop) => stop.failedRestarts)),
     stopSeconds,
     breakCount: breaks.length,
     breakSeconds,
@@ -523,36 +581,56 @@ function spanText(seconds) {
   return rest ? `${minutes} min ${rest} s` : `${minutes} min`;
 }
 
-// Rule-based observations, ranked so the clearest ones surface first.
+// Rule-based observations. Each belongs to a group so that no two of them say the same thing, the
+// clearest ones surface first, and one slot is kept for something that went well.
 function buildTakeaways(analysis, options) {
-  const { sideBalance: balance, stopSummary, fatigue, sessionStart } = analysis;
+  const { sideBalance: balance, stopSummary, fatigue, sessionStart, turnSummary, turns } = analysis;
   const candidates = [];
-  const add = (score, tone, title, text) => candidates.push({ score, tone, title, text });
+  const add = (group, score, tone, title, text) => candidates.push({ group, score, tone, title, text });
 
   if (balance.length === 2) {
     const [first, second] = balance;
-    if (first.turns.made >= 3 && second.turns.made >= 3) {
-      const difference = Math.abs(first.turns.medianSpeedKept - second.turns.medianSpeedKept);
-      const [weak, strong] = first.turns.medianSpeedKept < second.turns.medianSpeedKept ? [first, second] : [second, first];
-      if (difference >= 0.08) {
-        add(2 + difference * 10, "focus", `Turns onto ${weak.label} cost more speed`,
-          `You keep ${percent(weak.turns.medianSpeedKept)}% of your speed turning onto your ${weak.label} legs and ${percent(strong.turns.medianSpeedKept)}% turning onto ${strong.label}. The turn onto ${weak.label} is the one to practise.`);
-      }
-    }
-    if (first.turns.attempted >= 4 && second.turns.attempted >= 4) {
-      const failure = (side) => side.turns.stopped / side.turns.attempted;
+    const failure = (side) => side.turns.stopped / side.turns.attempted;
+    const enoughAttempts = first.turns.attempted >= 4 && second.turns.attempted >= 4;
+    const enoughMade = first.turns.made >= 3 && second.turns.made >= 3;
+
+    // Which side loses more turns to a stop, and which keeps less speed in the turns that are made.
+    let stops = null;
+    if (enoughAttempts) {
       const difference = Math.abs(failure(first) - failure(second));
       const [weak, strong] = failure(first) > failure(second) ? [first, second] : [second, first];
-      if (difference >= 0.2 && weak.turns.stopped >= 3) {
-        add(2.5 + difference * 8, "focus", `More turns onto ${weak.label} end in a stop`,
-          `${weak.turns.stopped} of ${weak.turns.attempted} turns onto ${weak.label} ended in a stop, against ${strong.turns.stopped} of ${strong.turns.attempted} onto ${strong.label}.`);
+      if (difference >= 0.2 && weak.turns.stopped >= 3) stops = { weak, strong, difference };
+    }
+    let speed = null;
+    if (enoughMade) {
+      const difference = Math.abs(first.turns.medianSpeedKept - second.turns.medianSpeedKept);
+      const [weak, strong] = first.turns.medianSpeedKept < second.turns.medianSpeedKept ? [first, second] : [second, first];
+      if (difference >= 0.08) speed = { weak, strong, difference };
+    }
+    const stopsText = stops && `${stops.weak.turns.stopped} of ${stops.weak.turns.attempted} turns onto ${stops.weak.label} ended in a stop, against ${stops.strong.turns.stopped} of ${stops.strong.turns.attempted} onto ${stops.strong.label}`;
+    if (stops && speed && stops.weak === speed.weak) {
+      add("side-turns", 3 + stops.difference * 8 + speed.difference * 10, "focus", `Turns onto ${stops.weak.label} are your weak side`,
+        `${stopsText}. The ones you made kept ${percent(speed.weak.turns.medianSpeedKept)}% of your speed, against ${percent(speed.strong.turns.medianSpeedKept)}% onto ${speed.strong.label}. That turn is the one to practise.`);
+    } else {
+      if (stops) add("side-turn-stops", 2.5 + stops.difference * 8, "focus", `More turns onto ${stops.weak.label} end in a stop`, `${stopsText}.`);
+      if (speed) {
+        add("side-turn-speed", 2 + speed.difference * 10, "focus", `Turns onto ${speed.weak.label} cost more speed`,
+          `You keep ${percent(speed.weak.turns.medianSpeedKept)}% of your speed turning onto your ${speed.weak.label} legs and ${percent(speed.strong.turns.medianSpeedKept)}% turning onto ${speed.strong.label}. The turn onto ${speed.weak.label} is the one to practise.`);
       }
     }
+    const even = enoughAttempts && enoughMade
+      && Math.abs(failure(first) - failure(second)) < 0.1
+      && Math.abs(first.turns.medianSpeedKept - second.turns.medianSpeedKept) < 0.05;
+    if (even) {
+      add("side-turns", 0.75, "strength", "Your turns are even on both sides",
+        `You made ${first.turns.made} of ${first.turns.attempted} turns onto ${first.label} and ${second.turns.made} of ${second.turns.attempted} onto ${second.label}, keeping ${percent(first.turns.medianSpeedKept)}% and ${percent(second.turns.medianSpeedKept)}% of your speed.`);
+    }
+
     if (first.seconds >= 120 && second.seconds >= 120) {
       const [fast, slow] = first.averageSpeed > second.averageSpeed ? [first, second] : [second, first];
       const difference = fast.averageSpeed / slow.averageSpeed - 1;
       if (difference >= 0.05) {
-        add(1 + difference * 10, "note", `Faster heading ${fast.label}`,
+        add("side-speed", 1 + difference * 10, "note", `Faster heading ${fast.label}`,
           `You average ${kilometresPerHour(fast.averageSpeed)} km/h heading ${fast.label} and ${kilometresPerHour(slow.averageSpeed)} km/h heading ${slow.label}. That can be your stance, or one direction pointing higher into the wind.`);
       }
     }
@@ -561,38 +639,67 @@ function buildTakeaways(analysis, options) {
   if (stopSummary.stopCount >= 3) {
     const { stopCount, stopsInTurns, stopsMidLeg } = stopSummary;
     if (stopsInTurns / stopCount >= 0.6) {
-      add(1.5 + stopCount / 6, "focus", "Most stops happen in turns", `${stopsInTurns} of ${stopCount} stops came in a turn and ${stopsMidLeg} came mid-leg, so transitions are where you lose the most time.`);
+      add("stop-place", 1.5 + stopCount / 6, "focus", "Most stops happen in turns", `${stopsInTurns} of ${stopCount} stops came in a turn and ${stopsMidLeg} came mid-leg, so transitions are where you lose the most time.`);
     } else if (stopsMidLeg / stopCount >= 0.6) {
-      add(1.5 + stopCount / 6, "focus", "Most stops happen mid-leg", `${stopsMidLeg} of ${stopCount} stops came while riding a leg and ${stopsInTurns} came in a turn.`);
+      add("stop-place", 1.5 + stopCount / 6, "focus", "Most stops happen mid-leg", `${stopsMidLeg} of ${stopCount} stops came while riding a leg and ${stopsInTurns} came in a turn.`);
     }
     if (stopSummary.medianRestartSeconds >= 20) {
-      add(1 + stopSummary.medianRestartSeconds / 40, "focus", `Restarts take ${spanText(stopSummary.medianRestartSeconds)}`,
-        `After a stop you were back at riding speed in a median of ${spanText(stopSummary.medianRestartSeconds)}; the slowest restart took ${spanText(stopSummary.longestRestartSeconds)}.`);
+      const attempts = stopSummary.failedRestarts ? ` ${stopSummary.failedRestarts} ${stopSummary.failedRestarts === 1 ? "restart" : "restarts"} failed within a few seconds.` : "";
+      add("restart", 1 + stopSummary.medianRestartSeconds / 40, "focus", `Restarts take ${spanText(stopSummary.medianRestartSeconds)}`,
+        `After a stop you were back at riding speed in a median of ${spanText(stopSummary.medianRestartSeconds)}; the slowest restart took ${spanText(stopSummary.longestRestartSeconds)}.${attempts}`);
     }
   }
 
   if (fatigue?.drop) {
     const minutes = Math.round((fatigue.drop.timestamp - sessionStart) / 60);
-    add(2.2 + fatigue.drop.speedDrop * 10, "focus", `Speed dropped after ${minutes} minutes`,
+    add("pace", 2.2 + fatigue.drop.speedDrop * 10, "focus", `Speed dropped after ${minutes} minutes`,
       `From then on your riding speed was ${percent(fatigue.drop.speedDrop)}% below your best earlier quarter. That can be fatigue or dropping wind.`);
   } else if (fatigue && finite(fatigue.speedChange) && fatigue.speedChange >= 0.05) {
-    add(0.9, "strength", "You got faster as the session went on", `Riding speed in the final quarter was ${percent(fatigue.speedChange)}% above the first.`);
+    add("pace", 0.9, "strength", "You got faster as the session went on", `Riding speed in the final quarter was ${percent(fatigue.speedChange)}% above the first.`);
   } else if (fatigue && finite(fatigue.speedChange) && Math.abs(fatigue.speedChange) < 0.05) {
-    add(0.9, "strength", "You held your pace", `Riding speed in the final quarter was within ${Math.max(1, percent(Math.abs(fatigue.speedChange)))}% of the first.`);
+    add("pace", 0.9, "strength", "You held your pace", `Riding speed in the final quarter was within ${Math.max(1, percent(Math.abs(fatigue.speedChange)))}% of the first.`);
   }
 
   if (stopSummary.boardShareOfWater !== null && stopSummary.boardSeconds >= 600) {
     const share = stopSummary.boardShareOfWater;
-    add(share < 0.85 ? 1.6 : 0.7, share < 0.85 ? "note" : "strength", `On the board ${percent(share)}% of your water time`,
+    add("board-time", share < 0.85 ? 1.6 : 0.7, share < 0.85 ? "note" : "strength", `On the board ${percent(share)}% of your water time`,
       `Between breaks you rode for ${spanText(stopSummary.boardSeconds)} and spent ${spanText(stopSummary.stopSeconds)} restarting after ${stopSummary.stopCount} ${stopSummary.stopCount === 1 ? "stop" : "stops"}.`);
   }
 
+  if (turnSummary.attempted >= 8 && turnSummary.successRate >= 0.85) {
+    add("turn-success", 0.8 + turnSummary.successRate / 10, "strength", `You rode through ${turnSummary.made} of ${turnSummary.attempted} turns`,
+      `Only ${turnSummary.stopped} ${turnSummary.stopped === 1 ? "turn" : "turns"} ended in a stop.`);
+  }
+
+  // The rider's own best turns are the reference for what a good turn looks like.
+  const kept = turns.filter((turn) => turn.outcome === "made").map((turn) => turn.speedKept).sort((left, right) => left - right);
+  if (kept.length >= 8) {
+    const best = kept[Math.floor(kept.length * 0.75)];
+    if (best - turnSummary.medianSpeedKept >= 0.05) {
+      add("best-turns", 0.65, "strength", `Your best turns keep ${percent(best)}% of your speed`,
+        `One turn in four kept ${percent(best)}% or more, against ${percent(turnSummary.medianSpeedKept)}% for a typical one. Those show what you can already do; find them in the chart and repeat them.`);
+    }
+  }
+
   if (stopSummary.longestRide && stopSummary.longestRide.seconds >= 300) {
-    add(0.6, "strength", `Longest ride without a stop: ${spanText(stopSummary.longestRide.seconds)}`,
+    add("longest-ride", 0.6, "strength", `Longest ride without a stop: ${spanText(stopSummary.longestRide.seconds)}`,
       `${(stopSummary.longestRide.distance / 1000).toFixed(2)} km at ${kilometresPerHour(stopSummary.longestRide.averageSpeed)} km/h average.`);
   }
 
-  return candidates.sort((left, right) => right.score - left.score).slice(0, options.takeawayCount).map(({ tone, title, text }) => ({ tone, title, text }));
+  // Best of each group by score; the last slot goes to something that went well if nothing above it did.
+  const ranked = candidates.sort((left, right) => right.score - left.score);
+  const picked = [];
+  const free = (candidate) => !picked.some((entry) => entry.group === candidate.group);
+  for (const candidate of ranked) {
+    if (picked.length >= options.takeawayCount - 1) break;
+    if (free(candidate)) picked.push(candidate);
+  }
+  const rest = ranked.filter(free);
+  const last = (!picked.some((entry) => entry.tone === "strength") && rest.find((candidate) => candidate.tone === "strength")) || rest[0];
+  if (last && picked.length < options.takeawayCount) picked.push(last);
+  return picked
+    .sort((left, right) => (left.tone === "strength") - (right.tone === "strength") || right.score - left.score)
+    .map(({ group, tone, title, text }) => ({ group, tone, title, text }));
 }
 
 export function analyzeCoaching(segmentation, { recordWind = null, options: suppliedOptions = {} } = {}) {

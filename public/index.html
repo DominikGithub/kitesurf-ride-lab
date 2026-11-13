@@ -27,6 +27,7 @@
            <a class="nav-item" href="#track-water" data-page="track-water"><span class="nav-index">03</span>Track &amp; water</a>
            <a class="nav-item" href="#ride-segments" data-page="ride-segments"><span class="nav-index">04</span>Ride segments</a>
            <a class="nav-item" href="#coaching" data-page="coaching"><span class="nav-index">05</span>Coaching &amp; Growth</a>
+           <a class="nav-item" href="#progress" data-page="progress"><span class="nav-index">06</span>Progress</a>
         </nav>
 
         <div class="sidebar-bottom">
@@ -353,7 +354,7 @@
             </div>
             <div class="analysis-instruction panel">
               <span class="analysis-instruction-number">01</span>
-              <div><strong>Start with the takeaways</strong><p>They are picked by rule from the numbers below. Hover a turn in the chart to see what it cost.</p></div>
+              <div><strong>Start with the takeaways</strong><p>They are picked by rule from the numbers below. Hover a turn in the chart or on the map to see what it cost and where it happened.</p></div>
             </div>
           </div>
 
@@ -391,13 +392,17 @@
                 <p class="coaching-copy" id="coachingTurnCopy"></p>
                 <div class="segments-stat-grid" id="coachingTurnStats"></div>
                 <div class="coaching-legend" id="coachingTurnLegend"></div>
+                <div class="coaching-turn-views">
                 <div class="coaching-chart-wrap" id="coachingTurnChartWrap">
                   <canvas id="coachingTurnChart" aria-label="Speed kept through each turn over the session"></canvas>
                   <div class="coaching-tooltip hidden" id="coachingTurnTooltip" role="status"></div>
                   <div class="chart-empty hidden" id="coachingTurnEmpty">No turns were found in this session</div>
                 </div>
+                <div class="segments-map-wrap coaching-map-wrap" id="coachingMapWrap"><div class="map-tiles" id="coachingMapTiles" aria-hidden="true"></div><canvas id="coachingMapCanvas" aria-label="Map of the track with every turn where it happened"></canvas><div class="map-zoom-controls" aria-label="Turn map controls"><button type="button" data-map-zoom="in" data-map-zoom-target="coaching" aria-label="Zoom in" title="Zoom in">+</button><button type="button" data-map-zoom="out" data-map-zoom-target="coaching" aria-label="Zoom out" title="Zoom out">-</button><button type="button" data-map-zoom="fit" data-map-zoom-target="coaching" aria-label="Fit map to track" title="Fit track">fit</button></div><div class="map-attribution">© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap contributors</a></div><div class="chart-empty hidden" id="coachingMapEmpty">No GPS track in this file</div></div>
+                </div>
+                <p class="coaching-map-note" id="coachingMapNote"></p>
                 <details class="coaching-details">
-                  <summary>Show every turn as a table</summary>
+                  <summary><span><span class="when-closed">Show</span><span class="when-open">Hide</span> every turn as a table</span></summary>
                   <div class="coaching-table-scroll">
                     <table class="coaching-table">
                       <thead><tr><th>Time</th><th>Turned onto</th><th>Result</th><th class="is-number">Entry speed</th><th class="is-number">Slowest</th><th class="is-number">Speed kept</th><th class="is-number">Back to speed</th></tr></thead>
@@ -426,7 +431,7 @@
                 <p class="coaching-copy" id="coachingUpwindCopy"></p>
                 <div class="segments-stat-grid" id="coachingUpwindStats"></div>
                 <details class="coaching-details" id="coachingUpwindSections">
-                  <summary>Show ground gained in each ride section</summary>
+                  <summary><span><span class="when-closed">Show</span><span class="when-open">Hide</span> ground gained in each ride section</span></summary>
                   <div class="coaching-table-scroll">
                     <table class="coaching-table">
                       <thead><tr><th>Ride section</th><th class="is-number">Legs measured</th><th class="is-number">Ground gained upwind</th></tr></thead>
@@ -512,7 +517,7 @@
                   </div>
                 </div>
                 <details class="coaching-details" id="trackWaterSectionDetails">
-                  <summary>Show ground gained in each ride section</summary>
+                  <summary><span><span class="when-closed">Show</span><span class="when-open">Hide</span> ground gained in each ride section</span></summary>
                   <div class="coaching-table-scroll">
                     <table class="coaching-table">
                       <thead><tr><th>Ride section</th><th class="is-number">Started at</th><th class="is-number">Ended at</th><th class="is-number">Ground gained</th></tr></thead>
@@ -531,7 +536,7 @@
                 <div class="coaching-legend" id="trackWaterMapLegend"></div>
                 <div class="segments-map-wrap track-water-map-wrap" id="trackWaterMapWrap"><div class="map-tiles" id="trackWaterMapTiles" aria-hidden="true"></div><canvas id="trackWaterMapCanvas" aria-label="Map of the track with stops or riding speed"></canvas><div class="map-zoom-controls" aria-label="Track map controls"><button type="button" data-map-zoom="in" data-map-zoom-target="track-water" aria-label="Zoom in" title="Zoom in">+</button><button type="button" data-map-zoom="out" data-map-zoom-target="track-water" aria-label="Zoom out" title="Zoom out">-</button><button type="button" data-map-zoom="fit" data-map-zoom-target="track-water" aria-label="Fit map to track" title="Fit track">fit</button></div><div class="map-attribution">© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap contributors</a></div><div class="coaching-tooltip hidden" id="trackWaterMapTooltip" role="status"></div></div>
                 <details class="coaching-details">
-                  <summary>Show every stop as a table</summary>
+                  <summary><span><span class="when-closed">Show</span><span class="when-open">Hide</span> every stop as a table</span></summary>
                   <div class="coaching-table-scroll">
                     <table class="coaching-table">
                       <thead><tr><th>Time</th><th>Happened</th><th>Where on the run</th><th class="is-number">Riding again after</th></tr></thead>
@@ -541,6 +546,54 @@
                 </details>
               </section>
             </div>
+          </div>
+        </section>
+
+        <section class="coaching-page progress-page hidden" id="progressPage" aria-live="polite">
+          <input id="progressInput" type="file" accept=".fit,.FIT,application/octet-stream" multiple hidden />
+          <div class="analysis-hero">
+            <div>
+              <p class="section-number">Ride lab / 06</p>
+              <h1>Follow your <em>progress.</em></h1>
+              <p class="intro-copy">Load several rides at once and follow a few measures from session to session: speed, turns, stops and how long you stay on the board.</p>
+            </div>
+            <div class="analysis-instruction panel">
+              <span class="analysis-instruction-number">01</span>
+              <div><strong>Pick what to follow</strong><p>Five measures are shown to start with. The Measures button adds more, such as best speeds, restarts and upwind progress.</p></div>
+            </div>
+          </div>
+
+          <section class="analysis-empty panel" id="progressEmpty">
+            <p class="empty-kicker">Progress needs several rides</p>
+            <h2>Choose your FIT files<br /><span>all at once.</span></h2>
+            <p>Select as many rides as you like in the file dialog (hold Ctrl or Shift), or drop them on this page. They are read in the browser one after another. Nothing is uploaded or stored, and reloading the page forgets them.</p>
+            <button class="button button-primary" id="progressChooseButton" type="button">Choose FIT files <span class="button-icon">+</span></button>
+            <p class="progress-status hidden" id="progressEmptyStatus" role="status"></p>
+          </section>
+
+          <div class="coaching-body hidden" id="progressBody">
+            <section class="coaching-panel panel progress-toolbar">
+              <div class="panel-heading">
+                <div><p class="panel-kicker">Rides loaded</p><h3 id="progressTitle">Rides</h3></div>
+                <div class="progress-actions"><button class="button button-secondary" id="progressAddButton" type="button">Add rides <span>+</span></button><button class="text-button" id="progressClearButton" type="button">Remove all</button></div>
+              </div>
+              <p class="coaching-copy" id="progressCopy"></p>
+              <p class="progress-status hidden" id="progressStatus" role="status"></p>
+              <details class="coaching-details progress-menu" id="progressMenu">
+                <summary><span>Measures</span><span class="progress-menu-count" id="progressMenuCount"></span></summary>
+                <div class="progress-menu-panel" id="progressMenuPanel"></div>
+              </details>
+            </section>
+
+            <div class="progress-grid" id="progressGrid"></div>
+
+            <section class="coaching-panel panel">
+              <div class="panel-heading"><div><p class="panel-kicker">Ride by ride</p><h3>The same numbers as a table</h3></div><span class="chart-unit">bold = best ride for that measure</span></div>
+              <p class="coaching-copy">Open a ride to see it in full on the other pages.</p>
+              <div class="coaching-table-scroll">
+                <table class="coaching-table progress-table" id="progressTable"></table>
+              </div>
+            </section>
           </div>
         </section>
 

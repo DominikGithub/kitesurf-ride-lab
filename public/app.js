@@ -1,6 +1,7 @@
 import { dateFromFit, decodeFit, getField } from "./fit-decoder.js";
 import { analyzeCoaching } from "./coaching.js";
-import { createDemoActivity } from "./demo-session.js";
+import { createDemoActivity, createDemoSeries } from "./demo-session.js";
+import { DEFAULT_PROGRESS_METRICS, PROGRESS_KINDS, PROGRESS_METRICS, describeChange, sameSession, sortSessions, summarizeSession } from "./progress.js";
 import { sectionContainsIndex, segmentTrack } from "./track-segmentation.js";
 import { analyzeTrackWater } from "./track-water.js";
 import { calculateWindCoaching, resolveWindAnnotation, summarizeAnnotatedWind } from "./wind-annotation.js";
@@ -38,6 +39,9 @@ const coachingPage = $("#coachingPage");
 const coachingEmpty = $("#coachingEmpty");
 const coachingBody = $("#coachingBody");
 const coachingTurnCanvas = $("#coachingTurnChart");
+const coachingMapCanvas = $("#coachingMapCanvas");
+const coachingMapTiles = $("#coachingMapTiles");
+const progressPage = $("#progressPage");
 const trackWaterPage = $("#trackWaterPage");
 const trackWaterEmpty = $("#trackWaterEmpty");
 const trackWaterBody = $("#trackWaterBody");
@@ -46,6 +50,7 @@ const trackWaterChartCanvas = $("#trackWaterUpwindChart");
 const trackWaterMapCanvas = $("#trackWaterMapCanvas");
 const trackWaterMapTiles = $("#trackWaterMapTiles");
 
+const isDemoMode = new URLSearchParams(window.location.search).has("demo");
 const OVERVIEW_POINT_LIMIT = 720;
 const MAP_POINT_LIMIT = 720;
 const ANALYSIS_POINT_LIMIT = 900;
@@ -57,9 +62,11 @@ let analysisSelectionIndex = null;
 let analysisRenderState = { speed: null, heart: null, wind: null, map: null };
 let selectedSegmentIndex = null;
 let segmentRenderState = { map: null };
-let coachingRenderState = { marks: [], hoveredTurn: null, coaching: null };
+let coachingRenderState = { marks: [], mapMarks: [], hoveredTurn: null, coaching: null };
 const emptyTrackWaterState = (mode = "stops") => ({ mode, analysis: null, chart: null, hoveredPoint: null, hoveredEvent: null, hoveredMapPoint: null, mapMarks: [], mapPoints: [] });
 let trackWaterRenderState = emptyTrackWaterState();
+// The progress page keeps its own list of rides, independent of the ride open on the other pages.
+const progressState = { sessions: [], selected: new Set(DEFAULT_PROGRESS_METRICS), cards: [], hoveredIndex: null, nextId: 0, busy: false, windBusy: false, demoLoaded: false };
 let windAnnotationRequest = 0;
 let analysisMapFocus = null;
 const mapLayoutCache = new WeakMap();
@@ -830,6 +837,7 @@ function mapContainerForTarget(target) {
   if (target === "analysis") return analysisMapTiles;
   if (target === "segments") return segmentsMapTiles;
   if (target === "track-water") return trackWaterMapTiles;
+  if (target === "coaching") return coachingMapTiles;
   return mapTiles;
 }
 
@@ -898,6 +906,16 @@ function focusAnalysisMap(focusKey) {
 function updateCoachingFocusUI() {
   document.querySelectorAll("[data-map-focus]").forEach((tile) => {
     tile.classList.toggle("is-map-focused", tile.dataset.mapFocus === analysisMapFocus?.key);
+    // Only tiles that have something to show on the map behave like buttons.
+    const actionable = Boolean(currentActivity?.windCoachingFocus?.[tile.dataset.mapFocus]);
+    tile.classList.toggle("is-actionable", actionable);
+    if (actionable) {
+      tile.setAttribute("role", "button");
+      tile.tabIndex = 0;
+    } else {
+      tile.removeAttribute("role");
+      tile.removeAttribute("tabindex");
+    }
   });
 }
 
@@ -947,6 +965,7 @@ function renderWindCoaching(summary) {
     summary.windCoaching = null;
     summary.windCoachingFocus = null;
     resetWindCoaching();
+    updateCoachingFocusUI();
     return;
   }
   const coaching = calculateWindCoaching(summary.records, wind.recordWind);
@@ -961,6 +980,7 @@ function renderWindCoaching(summary) {
     legComparison: bestLegFocus,
     turn: coaching.turnIndices?.length ? { indices: coaching.turnIndices } : null,
   };
+  updateCoachingFocusUI();
   setText("#analysisBestVmg", bestLeg ? formatSpeed(bestLeg.vmg) : "—");
   setText("#analysisBestVmgDetail", bestLeg ? `${formatDuration(bestLeg.duration)} over ${formatDistance(bestLeg.distance)}` : "No stable upwind leg found");
   setText("#analysisTackAngle", bestLeg ? `${number(bestLeg.tackAngle, 0)} deg` : "—");
@@ -1236,6 +1256,7 @@ function bindSegmentInteractions() {
 const COACHING_SIDE_COLORS = ["#2a78d6", "#eb6834"];
 const COACHING_NEUTRAL_COLOR = "#898781";
 const COACHING_STOPPED_COLOR = "#d03b3b";
+const COACHING_MAP_CONTEXT_SECONDS = 25;
 const COACHING_TONE_LABELS = { focus: "Work on", strength: "Going well", note: "Worth knowing" };
 
 function coachingFor(summary) {
@@ -1383,6 +1404,95 @@ function drawTurnChart(coaching) {
   coachingRenderState.coaching = coaching;
 }
 
+// The GPS track as one list of points, each tagged with the run it belongs to so gaps are not bridged.
+function coachingTrackPoints(segmentation) {
+  segmentation.flatRoute ??= segmentation.routeRuns.flatMap((run, runIndex) => run.map((point) => ({ ...point, run: runIndex })));
+  return segmentation.flatRoute;
+}
+
+// Every turn of the chart at the place it happened, so a detected turn can be checked against the track.
+function drawCoachingMap(coaching) {
+  const canvas = coachingMapCanvas;
+  const wrapper = canvas.parentElement;
+  canvas.style.display = "block";
+  const width = Math.max(240, Math.floor(wrapper.clientWidth));
+  const height = Math.max(220, Math.floor(wrapper.clientHeight));
+  const ratio = Math.min(window.devicePixelRatio || 1, 1.5);
+  canvas.width = width * ratio;
+  canvas.height = height * ratio;
+  canvas.style.width = `${width}px`;
+  canvas.style.height = `${height}px`;
+  const context = canvas.getContext("2d");
+  context.setTransform(ratio, 0, 0, ratio, 0, 0);
+  context.clearRect(0, 0, width, height);
+
+  const points = coachingTrackPoints(currentActivity.segmentation);
+  const tileContainer = coachingMapTiles;
+  $("#coachingMapEmpty").classList.toggle("hidden", points.length >= 2);
+  if (points.length < 2) {
+    tileContainer.replaceChildren();
+    mapLayoutCache.delete(tileContainer);
+    coachingRenderState.mapMarks = [];
+    return;
+  }
+  const bounds = points.reduce((result, point) => ({
+    minLatitude: Math.min(result.minLatitude, point.latitude),
+    maxLatitude: Math.max(result.maxLatitude, point.latitude),
+    minLongitude: Math.min(result.minLongitude, point.longitude),
+    maxLongitude: Math.max(result.maxLongitude, point.longitude),
+  }), { minLatitude: 90, maxLatitude: -90, minLongitude: 180, maxLongitude: -180 });
+  const requestedZoom = mapZoomState.get(tileContainer) ?? null;
+  const pan = mapPanState.get(tileContainer) ?? { x: 0, y: 0 };
+  const layoutKey = [width, height, points.length, bounds.minLatitude.toFixed(6), bounds.maxLatitude.toFixed(6), bounds.minLongitude.toFixed(6), bounds.maxLongitude.toFixed(6), requestedZoom ?? "auto", pan.x.toFixed(1), pan.y.toFixed(1)].join(":");
+  const cachedLayout = mapLayoutCache.get(tileContainer);
+  const map = cachedLayout?.key === layoutKey ? cachedLayout.map : loadMapTiles(points, width, height, tileContainer, requestedZoom);
+  if (cachedLayout?.key !== layoutKey) mapLayoutCache.set(tileContainer, { key: layoutKey, map });
+  const project = (point) => {
+    const projected = webMercatorPoint(point, map.zoom);
+    return { x: projected.x - map.viewportLeft, y: projected.y - map.viewportTop };
+  };
+  const projected = points.map(project);
+
+  strokeTrack(context, points, projected, () => true, "rgba(255, 255, 255, .9)", 5);
+  strokeTrack(context, points, projected, () => true, "#879793", 1.75);
+
+  const hovered = coachingRenderState.hoveredTurn;
+  const marks = coaching.turns.filter((turn) => turn.position).map((turn) => ({ turn, ...project(turn.position) }));
+  const drawMark = (mark) => {
+    if (mark.turn.outcome === "made") drawDot(context, mark, 4, COACHING_SIDE_COLORS[mark.turn.toSide] ?? COACHING_NEUTRAL_COLOR);
+    else drawCross(context, mark.x, mark.y, false);
+  };
+  marks.forEach(drawMark);
+  // The stretch ridden into and out of the hovered turn, drawn dark so its shape can be judged.
+  if (hovered) {
+    const from = hovered.timestamp - COACHING_MAP_CONTEXT_SECONDS;
+    const to = hovered.timestamp + (hovered.restartSeconds ?? 0) + COACHING_MAP_CONTEXT_SECONDS;
+    strokeTrack(context, points, projected, (point) => point.timestamp >= from && point.timestamp <= to, "#fbfcf8", 7);
+    strokeTrack(context, points, projected, (point) => point.timestamp >= from && point.timestamp <= to, "#17252a", 3.5);
+  }
+
+  const hoveredMark = marks.find((mark) => mark.turn === hovered);
+  if (hoveredMark) {
+    drawMark(hoveredMark);
+    context.strokeStyle = "#17252a";
+    context.lineWidth = 1.5;
+    context.beginPath();
+    context.arc(hoveredMark.x, hoveredMark.y, 10, 0, Math.PI * 2);
+    context.stroke();
+  }
+  coachingRenderState.mapMarks = marks;
+}
+
+function setHoveredTurn(turn) {
+  if (turn === coachingRenderState.hoveredTurn) return;
+  coachingRenderState.hoveredTurn = turn;
+  const { coaching } = coachingRenderState;
+  if (!coaching) return;
+  drawTurnChart(coaching);
+  drawCoachingMap(coaching);
+  showTurnTooltip(turn ? coachingRenderState.marks.find((mark) => mark.turn === turn) : null);
+}
+
 function showTurnTooltip(mark) {
   const tooltip = $("#coachingTurnTooltip");
   if (!mark) {
@@ -1443,6 +1553,9 @@ function renderCoachingTurns(coaching) {
     showTurnTooltip(null);
   }
   drawTurnChart(coaching);
+  drawCoachingMap(coaching);
+  const placed = coaching.turns.filter((turn) => turn.position).length;
+  setText("#coachingMapNote", `Hover a turn in the chart or on the map to find it in the other. The dark line is the ${number(COACHING_MAP_CONTEXT_SECONDS)} seconds before and after it.${placed < coaching.turns.length ? ` ${number(coaching.turns.length - placed)} of ${number(coaching.turns.length)} turns have no GPS fix nearby and are missing from the map.` : ""}`);
 
   const cell = (text, className = "") => element("td", className, text);
   $("#coachingTurnTableBody").replaceChildren(...coaching.turns.map((turn) => {
@@ -1510,12 +1623,12 @@ function renderCoachingSides(coaching) {
 function renderCoachingStops(coaching, summary) {
   const stops = coaching.stopSummary;
   const options = summary.segmentation.options;
-  setText("#coachingStopCopy", `A stop is any stretch out on the water where you stayed below ${formatSpeed(options.lowMovementSpeedMps)} for at least ${number(coaching.options.minimumStopSeconds)} seconds. Stops longer than ${number(coaching.options.breakSeconds / 60)} minutes count as breaks.`);
+  setText("#coachingStopCopy", `A stop is any stretch out on the water where you stayed below ${formatSpeed(options.lowMovementSpeedMps)} for at least ${number(coaching.options.minimumStopSeconds)} seconds. Getting up for less than ${number(coaching.options.minimumRideSeconds)} seconds and going down again counts as a failed restart of the same stop. Stops longer than ${number(coaching.options.breakSeconds / 60)} minutes count as breaks.`);
   const where = [`${number(stops.stopsInTurns)} in a turn`, `${number(stops.stopsMidLeg)} mid-leg`];
   if (stops.stopsUnclear) where.push(`${number(stops.stopsUnclear)} unclear`);
   $("#coachingStopStats").replaceChildren(
     statTile("Stops", number(stops.stopCount), where.join(" · ")),
-    statTile("Typical restart", formatSeconds(stops.medianRestartSeconds), stops.longestRestartSeconds === null ? "no stops" : `longest ${formatSeconds(stops.longestRestartSeconds)}`),
+    statTile("Typical restart", formatSeconds(stops.medianRestartSeconds), stops.longestRestartSeconds === null ? "no stops" : `longest ${formatSeconds(stops.longestRestartSeconds)}${stops.failedRestarts ? ` · ${number(stops.failedRestarts)} failed ${stops.failedRestarts === 1 ? "restart" : "restarts"}` : ""}`),
     statTile("Time on board", formatShare(stops.boardShareOfWater), "of water time, breaks left out"),
     statTile("Riding time", formatDuration(stops.boardSeconds), `${formatShare(stops.boardShareOfSession)} of the whole session`),
     statTile("Breaks", number(stops.breakCount), stops.breakCount ? `${formatDuration(stops.breakSeconds)} in total` : `none longer than ${number(coaching.options.breakSeconds / 60)} minutes`),
@@ -1625,17 +1738,19 @@ function bindCoachingInteractions() {
       const distance = Math.hypot(mark.x - x, mark.y - y);
       return distance < 28 && (!best || distance < best.distance) ? { mark, distance } : best;
     }, null)?.mark ?? null;
-    if ((nearest?.turn ?? null) === coachingRenderState.hoveredTurn) return;
-    coachingRenderState.hoveredTurn = nearest?.turn ?? null;
-    drawTurnChart(coachingRenderState.coaching);
-    showTurnTooltip(nearest);
+    setHoveredTurn(nearest?.turn ?? null);
   });
-  coachingTurnCanvas.addEventListener("pointerleave", () => {
-    if (!coachingRenderState.hoveredTurn) return;
-    coachingRenderState.hoveredTurn = null;
-    drawTurnChart(coachingRenderState.coaching);
-    showTurnTooltip(null);
+  coachingTurnCanvas.addEventListener("pointerleave", () => setHoveredTurn(null));
+  coachingMapCanvas.addEventListener("pointermove", (event) => {
+    if (mapPointerState.get(coachingMapCanvas)?.dragging) return setHoveredTurn(null);
+    const { x, y } = canvasPointerPosition(coachingMapCanvas, event);
+    const nearest = coachingRenderState.mapMarks.reduce((best, mark) => {
+      const distance = Math.hypot(mark.x - x, mark.y - y);
+      return distance < 18 && (!best || distance < best.distance) ? { mark, distance } : best;
+    }, null)?.mark ?? null;
+    return setHoveredTurn(nearest?.turn ?? null);
   });
+  coachingMapCanvas.addEventListener("pointerleave", () => setHoveredTurn(null));
 }
 
 const TRACK_WATER_RIDING_COLOR = "#2a78d6";
@@ -2202,9 +2317,465 @@ function bindTrackWaterInteractions() {
   });
 }
 
+const PROGRESS_LINE_COLOR = "#2a78d6";
+const PROGRESS_DIRECTION_WORDS = { better: "Better", worse: "Worse", level: "Level", up: "Up", down: "Down" };
+
+function progressMetric(key) {
+  return PROGRESS_METRICS.find((metric) => metric.key === key);
+}
+
+function selectedProgressMetrics() {
+  return PROGRESS_METRICS.filter((metric) => progressState.selected.has(metric.key));
+}
+
+function progressDisplay(metric, value) {
+  return typeof value === "number" && Number.isFinite(value) ? value * PROGRESS_KINDS[metric.kind].scale : null;
+}
+
+function formatProgressValue(metric, value) {
+  const kind = PROGRESS_KINDS[metric.kind];
+  const shown = progressDisplay(metric, value);
+  return shown === null ? "—" : `${number(shown, kind.digits)}${kind.unit === "%" ? "" : " "}${kind.unit}`;
+}
+
+function formatProgressChange(metric, difference) {
+  const kind = PROGRESS_KINDS[metric.kind];
+  const shown = Math.abs(difference * kind.scale);
+  return `${difference >= 0 ? "+" : "−"}${number(shown, kind.digits)} ${kind.changeUnit ?? kind.unit}`;
+}
+
+function progressDateLabel(session, withYear = false) {
+  const date = dateFromFit(session.start);
+  if (!date || Number.isNaN(date.getTime())) return "no date";
+  return date.toLocaleDateString(undefined, withYear ? { dateStyle: "medium" } : { month: "short", day: "numeric" });
+}
+
+function setProgressStatus(lines) {
+  const text = lines.filter(Boolean).join("\n");
+  ["#progressStatus", "#progressEmptyStatus"].forEach((selector) => {
+    $(selector).textContent = text;
+    $(selector).classList.toggle("hidden", !text);
+  });
+}
+
+function progressNeedsWind() {
+  return selectedProgressMetrics().some((metric) => metric.needsWind);
+}
+
+function addProgressSession(source, activity) {
+  const summary = summarizeSession(activity);
+  if (progressState.sessions.some((session) => sameSession(session, summary))) return false;
+  progressState.nextId += 1;
+  progressState.sessions = sortSessions([...progressState.sessions, { id: progressState.nextId, wind: "none", ...source, ...summary }]);
+  return true;
+}
+
+// Reads the chosen files one after another. Only the measures are kept; the decoded ride is dropped again.
+async function addProgressFiles(files) {
+  if (progressState.busy || !files.length) return;
+  progressState.busy = true;
+  const problems = [];
+  let duplicates = 0;
+  for (const [position, file] of files.entries()) {
+    setProgressStatus([`Reading ride ${number(position + 1)} of ${number(files.length)}…`]);
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    try {
+      const activity = decodeFit(await file.arrayBuffer());
+      if (!activity.records?.length) throw new Error("it contains no track records");
+      if (!addProgressSession({ fileName: file.name, file }, activity)) duplicates += 1;
+    } catch (error) {
+      problems.push(`${file.name}: ${error.message || "could not be read"}`);
+    }
+  }
+  progressState.busy = false;
+  progressState.hoveredIndex = null;
+  setProgressStatus([
+    duplicates ? `${number(duplicates)} ${duplicates === 1 ? "file was" : "files were"} already loaded and skipped.` : "",
+    problems.length ? `${number(problems.length)} ${problems.length === 1 ? "file" : "files"} could not be read:\n${problems.join("\n")}` : "",
+  ]);
+  renderProgress();
+  ensureProgressWind();
+}
+
+// Upwind measures need a wind direction per ride: the weather saved in the FIT file if there is any,
+// otherwise a lookup at Open-Meteo. This only runs once an upwind measure is switched on.
+async function ensureProgressWind() {
+  if (progressState.windBusy || !progressNeedsWind()) return;
+  progressState.windBusy = true;
+  for (const session of [...progressState.sessions]) {
+    if (!progressNeedsWind()) break;
+    if (session.wind !== "none" || !session.available || !progressState.sessions.includes(session)) continue;
+    session.wind = "loading";
+    renderProgress();
+    try {
+      const activity = session.activity ?? decodeFit(await session.file.arrayBuffer());
+      const annotation = await resolveWindAnnotation(activity);
+      const recordWind = annotation.recordWind?.some(Boolean) ? annotation.recordWind : null;
+      const withWind = recordWind ? summarizeSession(activity, { recordWind }) : null;
+      if (withWind?.hasWind) session.metrics = withWind.metrics;
+      session.wind = withWind?.hasWind ? "ready" : "unavailable";
+    } catch {
+      session.wind = "unavailable";
+    }
+  }
+  progressState.windBusy = false;
+  renderProgress();
+}
+
+function loadProgressDemo() {
+  if (progressState.demoLoaded) return;
+  progressState.demoLoaded = true;
+  createDemoSeries().forEach(({ fileName, activity }) => addProgressSession({ fileName, activity }, activity));
+}
+
+function openProgressSession(session) {
+  if (session.activity) {
+    render(session.activity, session.fileName);
+    annotateWind(session.activity);
+  } else {
+    loadFile(session.file);
+  }
+  window.location.hash = "#overview";
+}
+
+function drawProgressChart(card) {
+  const { canvas, metric } = card;
+  const { context, width, height } = prepareCanvas(canvas, 200, 140);
+  const sessions = progressState.sessions;
+  const kind = PROGRESS_KINDS[metric.kind];
+  const values = sessions.map((session) => progressDisplay(metric, session.metrics[metric.key]));
+  const present = values.filter((value) => value !== null);
+  const padding = { top: 24, right: 22, bottom: 26, left: 46 };
+  const plotBottom = height - padding.bottom;
+  const plotWidth = width - padding.left - padding.right;
+  const x = (index) => (sessions.length > 1 ? padding.left + (index / (sessions.length - 1)) * plotWidth : padding.left + plotWidth / 2);
+  card.x = x;
+
+  context.font = "9px ui-monospace, SFMono-Regular, Menlo, monospace";
+  if (!present.length) {
+    context.fillStyle = "#9ba5a3";
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillText(metric.needsWind ? "no wind direction for these rides yet" : "no ride has this measure", width / 2, height / 2);
+    return;
+  }
+
+  let low = Math.min(...present);
+  let high = Math.max(...present);
+  const margin = high > low ? (high - low) * 0.18 : Math.max(Math.abs(high) * 0.1, 1);
+  low -= margin;
+  high += margin;
+  if (metric.kind === "share") {
+    low = Math.max(0, low);
+    high = Math.min(100, high);
+  } else if (Math.min(...present) >= 0) {
+    low = Math.max(0, low);
+  }
+  const step = niceStep(high - low, 4);
+  const y = (value) => plotBottom - ((value - low) / (high - low)) * (plotBottom - padding.top);
+
+  context.lineWidth = 1;
+  context.textAlign = "right";
+  context.textBaseline = "middle";
+  for (let tick = Math.ceil(low / step) * step; tick <= high + step * 1e-6; tick += step) {
+    context.strokeStyle = "rgba(55, 77, 80, 0.16)";
+    context.fillStyle = "#9ba5a3";
+    context.fillText(number(tick, step < 1 ? 1 : 0), padding.left - 8, y(tick));
+    context.beginPath();
+    context.moveTo(padding.left, y(tick));
+    context.lineTo(width - padding.right, y(tick));
+    context.stroke();
+  }
+
+  // Date labels: every ride when there is room, otherwise a spread of them, always including the last.
+  const labelEvery = Math.max(1, Math.ceil(sessions.length / Math.max(2, Math.floor(plotWidth / 52))));
+  const hovered = progressState.hoveredIndex;
+  context.textBaseline = "alphabetic";
+  sessions.forEach((session, index) => {
+    const labelled = index === hovered || (hovered === null && (index % labelEvery === 0 || index === sessions.length - 1) && !(index !== sessions.length - 1 && sessions.length - 1 - index < labelEvery));
+    if (!labelled) return;
+    context.fillStyle = index === hovered ? "#17252a" : "#9ba5a3";
+    context.textAlign = index === 0 && sessions.length > 1 ? "left" : index === sessions.length - 1 && sessions.length > 1 ? "right" : "center";
+    context.fillText(progressDateLabel(session), x(index), height - 8);
+  });
+
+  if (hovered !== null) {
+    context.strokeStyle = "rgba(23, 37, 42, 0.3)";
+    context.beginPath();
+    context.moveTo(x(hovered), padding.top - 6);
+    context.lineTo(x(hovered), plotBottom);
+    context.stroke();
+  }
+
+  // The line only joins rides that follow each other; a ride without the measure leaves a gap.
+  context.strokeStyle = PROGRESS_LINE_COLOR;
+  context.lineWidth = 2;
+  context.lineJoin = "round";
+  context.beginPath();
+  values.forEach((value, index) => {
+    if (value === null) return;
+    if (index === 0 || values[index - 1] === null) context.moveTo(x(index), y(value));
+    else context.lineTo(x(index), y(value));
+  });
+  context.stroke();
+  values.forEach((value, index) => {
+    if (value !== null) drawDot(context, { x: x(index), y: y(value) }, index === hovered ? 5 : 3.5, PROGRESS_LINE_COLOR);
+  });
+
+  // Value labels on the first and last ride that have the measure, or on the hovered ride.
+  const firstIndex = values.findIndex((value) => value !== null);
+  const lastIndex = values.length - 1 - [...values].reverse().findIndex((value) => value !== null);
+  const labelIndexes = hovered !== null ? (values[hovered] !== null ? [hovered] : []) : [...new Set([firstIndex, lastIndex])];
+  context.fillStyle = "#17252a";
+  context.font = "700 10px ui-monospace, SFMono-Regular, Menlo, monospace";
+  context.textBaseline = "alphabetic";
+  labelIndexes.forEach((index) => {
+    const text = `${number(values[index], kind.digits)}${kind.unit === "%" ? "%" : ""}`;
+    const half = context.measureText(text).width / 2;
+    context.textAlign = "center";
+    context.fillText(text, clamp(x(index), padding.left + half - 4, width - half - 4), y(values[index]) - 9);
+  });
+}
+
+function drawProgressCharts() {
+  progressState.cards.forEach(drawProgressChart);
+  document.querySelectorAll("#progressTable tbody tr").forEach((row, index) => row.classList.toggle("is-hovered", index === progressState.hoveredIndex));
+}
+
+function setProgressHover(index) {
+  if (index === progressState.hoveredIndex) return;
+  progressState.hoveredIndex = index;
+  drawProgressCharts();
+}
+
+function progressChangeLine(metric, sessions) {
+  const values = sessions.map((session) => session.metrics[metric.key]);
+  const change = describeChange(values, metric.better);
+  const line = element("span", "progress-change");
+  if (!change) {
+    const loading = metric.needsWind && sessions.some((session) => session.wind === "loading" || (session.wind === "none" && session.available));
+    line.textContent = loading ? "Looking up the wind…" : values.some((value) => value !== null) ? "Only one ride has this measure" : metric.needsWind ? "No wind direction available" : "No ride has this measure";
+    return { line, change };
+  }
+  const since = `since ${change.firstIndex === 0 ? "the first ride" : progressDateLabel(sessions[change.firstIndex])}`;
+  line.classList.add(`is-${change.direction}`);
+  line.textContent = change.direction === "level"
+    ? `Level with ${change.firstIndex === 0 ? "the first ride" : progressDateLabel(sessions[change.firstIndex])}`
+    : `${PROGRESS_DIRECTION_WORDS[change.direction]}: ${formatProgressChange(metric, change.difference)} ${since}`;
+  return { line, change };
+}
+
+function renderProgressMenu() {
+  const panel = $("#progressMenuPanel");
+  setText("#progressMenuCount", `${number(progressState.selected.size)} of ${number(PROGRESS_METRICS.length)} shown`);
+  // Built once and then only kept in step, so ticking a box does not move keyboard focus.
+  if (panel.children.length) {
+    panel.querySelectorAll("[data-progress-metric]").forEach((box) => {
+      box.checked = progressState.selected.has(box.dataset.progressMetric);
+    });
+    return;
+  }
+  const groups = [...new Set(PROGRESS_METRICS.map((metric) => metric.group))].map((group) => {
+    const block = element("div", "progress-menu-group");
+    block.append(element("h4", "", group));
+    if (group === "Upwind") block.append(element("p", "", "Looks up the wind for every ride: weather saved in the FIT file first, otherwise Open-Meteo with a rounded coordinate and the date."));
+    PROGRESS_METRICS.filter((metric) => metric.group === group).forEach((metric) => {
+      const label = element("label");
+      const box = element("input");
+      box.type = "checkbox";
+      box.checked = progressState.selected.has(metric.key);
+      box.dataset.progressMetric = metric.key;
+      const text = element("span", "", metric.label);
+      text.append(element("small", "", metric.note));
+      label.append(box, text);
+      block.append(label);
+    });
+    return block;
+  });
+  const foot = element("div", "progress-menu-foot");
+  const reset = element("button", "text-button", "Back to the starting set");
+  reset.type = "button";
+  reset.dataset.progressReset = "true";
+  foot.append(reset);
+  panel.replaceChildren(...groups, foot);
+}
+
+function renderProgress() {
+  const sessions = progressState.sessions;
+  $("#progressEmpty").classList.toggle("hidden", sessions.length > 0);
+  $("#progressBody").classList.toggle("hidden", sessions.length === 0);
+  if (!sessions.length) {
+    progressState.cards = [];
+    return;
+  }
+  if (progressState.hoveredIndex !== null && progressState.hoveredIndex >= sessions.length) progressState.hoveredIndex = null;
+
+  const dated = sessions.filter((session) => typeof session.start === "number");
+  const idle = sessions.filter((session) => !session.available).length;
+  setText("#progressTitle", `${number(sessions.length)} ${sessions.length === 1 ? "ride" : "rides"}${dated.length > 1 ? `, ${progressDateLabel(dated[0], true)} to ${progressDateLabel(dated.at(-1), true)}` : ""}`);
+  const sentences = [sessions.length < 2
+    ? "Add at least one more ride to see how a measure changes."
+    : "Each chart follows one measure from ride to ride. Rides are in date order and evenly spaced, whatever the time between them. Hover a chart or a table row to read the same ride everywhere."];
+  if (idle) sentences.push(`${number(idle)} ${idle === 1 ? "ride has" : "rides have"} no riding in ${idle === 1 ? "it" : "them"} and ${idle === 1 ? "leaves" : "leave"} a gap.`);
+  if (progressNeedsWind()) {
+    const ready = sessions.filter((session) => session.wind === "ready").length;
+    const waiting = sessions.filter((session) => session.available && (session.wind === "none" || session.wind === "loading")).length;
+    sentences.push(waiting
+      ? `Looking up the wind: ${number(ready)} of ${number(sessions.filter((session) => session.available).length)} rides done.`
+      : ready
+        ? `Wind direction found for ${number(ready)} of ${number(sessions.filter((session) => session.available).length)} rides. Upwind measures are only as accurate as that direction, and modelled hourly wind is approximate.`
+        : "No wind direction could be found for these rides, so the upwind measures stay empty.");
+  }
+  setText("#progressCopy", sentences.join(" "));
+  renderProgressMenu();
+
+  const metrics = selectedProgressMetrics();
+  const latest = sessions.at(-1);
+  progressState.cards = [];
+  const cards = metrics.map((metric) => {
+    const card = element("article", "progress-card panel");
+    const head = element("div", "progress-card-head");
+    const title = element("div");
+    title.append(element("p", "panel-kicker", metric.group), element("h3", "", metric.label));
+    const hide = element("button", "text-button", "Hide");
+    hide.type = "button";
+    hide.dataset.progressHide = metric.key;
+    hide.setAttribute("aria-label", `Hide ${metric.label}`);
+    head.append(title, hide);
+
+    const { line, change } = progressChangeLine(metric, sessions);
+    const shown = change ? sessions[change.lastIndex] : latest;
+    const figures = element("div", "progress-card-figures");
+    const value = element("strong", "", formatProgressValue(metric, shown.metrics[metric.key]));
+    figures.append(value, element("small", "", `${shown === latest ? "latest ride" : "last ride with it"}, ${progressDateLabel(shown)}`), line);
+
+    const wrap = element("div", "progress-chart-wrap");
+    const canvas = element("canvas");
+    canvas.setAttribute("aria-label", `${metric.label} from ride to ride`);
+    wrap.append(canvas);
+    card.append(head, figures, element("p", "progress-card-note", `${metric.note}${metric.better ? `; ${metric.better === "high" ? "higher" : "lower"} is better` : ""}`), wrap);
+    progressState.cards.push({ canvas, metric });
+    return card;
+  });
+  if (!cards.length) cards.push(element("p", "progress-grid-empty", "No measure is selected. Open Measures above and tick the ones you want to follow."));
+  $("#progressGrid").replaceChildren(...cards);
+
+  // The same numbers as a table, with the best ride for each measure in bold.
+  const best = new Map(metrics.map((metric) => [metric.key, describeChange(sessions.map((session) => session.metrics[metric.key]), metric.better)?.bestIndex ?? null]));
+  const headRow = element("tr");
+  headRow.append(element("th", "", "Ride"), element("th", "is-number", "Length"));
+  metrics.forEach((metric) => headRow.append(element("th", "is-number", metric.label)));
+  headRow.append(element("th", "is-number", ""));
+  const head = element("thead");
+  head.append(headRow);
+  const body = element("tbody");
+  sessions.forEach((session, index) => {
+    const row = element("tr");
+    row.dataset.progressIndex = String(index);
+    const name = element("td", "", typeof session.start === "number" ? `${progressDateLabel(session, true)}, ${formatTime(session.start)}` : "No date");
+    name.append(element("small", "", session.available ? session.fileName : `${session.fileName} · no riding found`));
+    row.append(name, element("td", "is-number", formatDuration(session.durationSeconds)));
+    metrics.forEach((metric) => row.append(element("td", `is-number${best.get(metric.key) === index ? " is-best" : ""}`, formatProgressValue(metric, session.metrics[metric.key]))));
+    const actions = element("td", "is-number progress-row-actions");
+    const open = element("button", "text-button", "Open ›");
+    open.type = "button";
+    open.dataset.progressOpen = String(session.id);
+    open.title = "Open this ride on the other pages";
+    const remove = element("button", "text-button", "Remove");
+    remove.type = "button";
+    remove.dataset.progressRemove = String(session.id);
+    actions.append(open, remove);
+    row.append(actions);
+    body.append(row);
+  });
+  $("#progressTable").replaceChildren(head, body);
+  drawProgressCharts();
+}
+
+function bindProgressInteractions() {
+  const progressInput = $("#progressInput");
+  const choose = () => progressInput.click();
+  $("#progressChooseButton").addEventListener("click", choose);
+  $("#progressAddButton").addEventListener("click", choose);
+  progressInput.addEventListener("change", () => {
+    const files = [...(progressInput.files ?? [])];
+    progressInput.value = "";
+    addProgressFiles(files);
+  });
+  $("#progressClearButton").addEventListener("click", () => {
+    progressState.sessions = [];
+    progressState.hoveredIndex = null;
+    setProgressStatus([]);
+    renderProgress();
+  });
+
+  // Files can also be dropped anywhere on the page.
+  ["dragenter", "dragover"].forEach((name) => progressPage.addEventListener(name, (event) => {
+    event.preventDefault();
+    progressPage.classList.add("is-dragging");
+  }));
+  ["dragleave", "drop"].forEach((name) => progressPage.addEventListener(name, (event) => {
+    event.preventDefault();
+    progressPage.classList.remove("is-dragging");
+  }));
+  progressPage.addEventListener("drop", (event) => addProgressFiles([...(event.dataTransfer?.files ?? [])].filter((file) => /\.fit$/i.test(file.name))));
+
+  const menu = $("#progressMenu");
+  $("#progressMenuPanel").addEventListener("change", (event) => {
+    const key = event.target.dataset?.progressMetric;
+    if (!key) return;
+    if (event.target.checked) progressState.selected.add(key);
+    else progressState.selected.delete(key);
+    renderProgress();
+    ensureProgressWind();
+  });
+  $("#progressMenuPanel").addEventListener("click", (event) => {
+    if (!event.target.dataset?.progressReset) return;
+    progressState.selected = new Set(DEFAULT_PROGRESS_METRICS);
+    renderProgress();
+  });
+  document.addEventListener("click", (event) => {
+    if (menu.open && !menu.contains(event.target)) menu.open = false;
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && menu.open) menu.open = false;
+  });
+
+  $("#progressGrid").addEventListener("click", (event) => {
+    const key = event.target.dataset?.progressHide;
+    if (!key) return;
+    progressState.selected.delete(key);
+    renderProgress();
+  });
+  $("#progressGrid").addEventListener("pointermove", (event) => {
+    const card = progressState.cards.find((entry) => entry.canvas === event.target);
+    if (!card?.x || !progressState.sessions.length) return setProgressHover(null);
+    const { x } = canvasPointerPosition(card.canvas, event);
+    const nearest = progressState.sessions.reduce((best, _, index) => (Math.abs(card.x(index) - x) < Math.abs(card.x(best) - x) ? index : best), 0);
+    return setProgressHover(nearest);
+  });
+  $("#progressGrid").addEventListener("pointerleave", () => setProgressHover(null));
+
+  const table = $("#progressTable");
+  table.addEventListener("pointerover", (event) => {
+    const row = event.target.closest("tr[data-progress-index]");
+    setProgressHover(row ? Number(row.dataset.progressIndex) : null);
+  });
+  table.addEventListener("pointerleave", () => setProgressHover(null));
+  table.addEventListener("click", (event) => {
+    const { progressOpen, progressRemove } = event.target.dataset ?? {};
+    const session = progressState.sessions.find((entry) => String(entry.id) === (progressOpen ?? progressRemove));
+    if (!session) return;
+    if (progressOpen) return openProgressSession(session);
+    progressState.sessions = progressState.sessions.filter((entry) => entry !== session);
+    progressState.hoveredIndex = null;
+    return renderProgress();
+  });
+}
+
 function activePage() {
   const page = window.location.hash.slice(1);
-  return ["overview", "speed-effort", "track-water", "ride-segments", "coaching"].includes(page) ? page : "overview";
+  return ["overview", "speed-effort", "track-water", "ride-segments", "coaching", "progress"].includes(page) ? page : "overview";
 }
 
 function updatePage() {
@@ -2214,7 +2785,10 @@ function updatePage() {
   const segmentsActive = page === "ride-segments";
   const coachingActive = page === "coaching";
   const trackWaterActive = page === "track-water";
-  setText("#pageLabel", { overview: "overview", "speed-effort": "session overview", "track-water": "track & water", "ride-segments": "ride segments", coaching: "coaching" }[page]);
+  setText("#pageLabel", { overview: "overview", "speed-effort": "session overview", "track-water": "track & water", "ride-segments": "ride segments", coaching: "coaching", progress: "progress" }[page]);
+  const progressActive = page === "progress";
+  progressPage.classList.toggle("hidden", !progressActive);
+  if (progressActive && isDemoMode) loadProgressDemo();
   document.querySelectorAll("[data-page]").forEach((link) => link.classList.toggle("active", link.dataset.page === page));
   overviewIntro.classList.toggle("hidden", !overviewActive);
   emptyState.classList.toggle("hidden", !overviewActive || Boolean(currentActivity));
@@ -2231,15 +2805,19 @@ function updatePage() {
   trackWaterPage.classList.toggle("hidden", !trackWaterActive);
   trackWaterEmpty.classList.toggle("hidden", Boolean(currentActivity) || !trackWaterActive);
   trackWaterBody.classList.toggle("hidden", !currentActivity || !trackWaterActive);
-  if (currentActivity) scheduleVisualRender();
+  if (currentActivity || progressActive) scheduleVisualRender();
 }
 
 function scheduleVisualRender() {
   if (visualFrame !== null) return;
   visualFrame = requestAnimationFrame(() => {
     visualFrame = null;
-    if (!currentActivity) return;
     const page = activePage();
+    if (page === "progress") {
+      renderProgress();
+      return;
+    }
+    if (!currentActivity) return;
     if (page === "speed-effort") renderAnalysis(currentActivity);
     else if (page === "ride-segments") renderRideSegments(currentActivity);
     else if (page === "coaching") renderCoaching(currentActivity);
@@ -2354,20 +2932,23 @@ function render(activity, fileName) {
   mapZoomState.delete(analysisMapTiles);
   mapZoomState.delete(segmentsMapTiles);
   mapZoomState.delete(trackWaterMapTiles);
+  mapZoomState.delete(coachingMapTiles);
   mapPanState.delete(mapTiles);
   mapPanState.delete(analysisMapTiles);
   mapPanState.delete(segmentsMapTiles);
   mapPanState.delete(trackWaterMapTiles);
+  mapPanState.delete(coachingMapTiles);
   mapLayoutCache.delete(mapTiles);
   mapLayoutCache.delete(analysisMapTiles);
   mapLayoutCache.delete(segmentsMapTiles);
   mapLayoutCache.delete(trackWaterMapTiles);
+  mapLayoutCache.delete(coachingMapTiles);
   currentActivity = summarize(activity);
   currentActivity.segmentation = segmentTrack(currentActivity.records);
   analysisSelectionIndex = null;
   selectedSegmentIndex = null;
   segmentRenderState = { map: null };
-  coachingRenderState = { marks: [], hoveredTurn: null, coaching: null };
+  coachingRenderState = { marks: [], mapMarks: [], hoveredTurn: null, coaching: null };
   trackWaterRenderState = emptyTrackWaterState(trackWaterRenderState.mode);
   analysisMapFocus = null;
   updateCoachingFocusUI();
@@ -2480,6 +3061,11 @@ document.querySelectorAll("[data-map-zoom]").forEach((button) => {
 });
 document.querySelectorAll("[data-map-focus]").forEach((tile) => {
   tile.addEventListener("click", () => focusAnalysisMap(tile.dataset.mapFocus));
+  tile.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    focusAnalysisMap(tile.dataset.mapFocus);
+  });
 });
 window.addEventListener("hashchange", updatePage);
 
@@ -2497,18 +3083,20 @@ emptyState.addEventListener("drop", (event) => {
 });
 
 window.addEventListener("resize", () => {
-  if (currentActivity) scheduleVisualRender();
+  if (currentActivity || activePage() === "progress") scheduleVisualRender();
 });
 
 bindAnalysisInteractions();
 bindSegmentInteractions();
 bindCoachingInteractions();
+bindProgressInteractions();
 bindTrackWaterInteractions();
 bindMapPanning(analysisMapCanvas, analysisMapTiles);
 bindMapPanning(segmentsMapCanvas, segmentsMapTiles);
 bindMapPanning(trackWaterMapCanvas, trackWaterMapTiles);
+bindMapPanning(coachingMapCanvas, coachingMapTiles);
 
-if (new URLSearchParams(window.location.search).has("demo")) {
+if (isDemoMode) {
   const demoActivity = createDemoActivity();
   render(demoActivity, "synthetic-el-gouna-kite-session.fit");
   annotateWind(demoActivity);
