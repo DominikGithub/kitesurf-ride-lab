@@ -1,0 +1,15 @@
+.git
+.gitignore
+.env
+.design-proposal
+docs
+handover
+test
+test-helpers
+suunto fit
+node_modules
+*.fit
+*.FIT
+README.md
+Dockerfile
+.dockerignore
