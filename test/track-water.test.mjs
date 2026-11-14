@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { analyzeCoaching } from "../public/coaching.js";
 import { createDemoActivity } from "../public/demo-session.js";
 import { segmentTrack } from "../public/track-segmentation.js";
-import { analyzeTrackWater } from "../public/track-water.js";
+import { analyzeTrackWater, sectionRows } from "../public/track-water.js";
 import { resolveWindAnnotation } from "../public/wind-annotation.js";
 import { near, syntheticTrack } from "../test-helpers/synthetic-track.mjs";
 
@@ -118,4 +118,28 @@ test("reads the demo session", async () => {
   assert.ok(result.upwind.sections.every((section) => Number.isFinite(section.netMetres)));
   // The rider starts and finishes at the same spot on the beach.
   assert.ok(result.launchLanding.distance < 60, `launch to landing ${result.launchLanding.distance} m`);
+});
+
+test("lists one row per riding section with its stops and ground gained", () => {
+  const records = syntheticTrack([beach, leg(60), leg(300), { seconds: 40, speed: 0.3 }, leg(60), leg(300), beach]);
+  const recordWind = windFrom(0)(records);
+  const segmentation = segmentTrack(records);
+  const coaching = analyzeCoaching(segmentation, { recordWind });
+  const analysis = analyzeTrackWater(segmentation, coaching, { recordWind });
+  const rows = sectionRows(segmentation, coaching, analysis);
+  assert.equal(rows.length, segmentation.activeSections.length);
+  assert.ok(rows.length >= 1);
+  assert.ok(rows.every((row) => row.label.startsWith("Active section")));
+  assert.equal(rows.reduce((sum, row) => sum + row.stopCount, 0), coaching.stops.filter((stop) => stop.kind === "stop").length);
+  assert.ok(rows.every((row) => Number.isFinite(row.groundGained)));
+});
+
+test("leaves ground gained empty without a wind direction", () => {
+  const records = syntheticTrack([beach, leg(60), leg(300), beach]);
+  const segmentation = segmentTrack(records);
+  const coaching = analyzeCoaching(segmentation);
+  const rows = sectionRows(segmentation, coaching, analyzeTrackWater(segmentation, coaching));
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].groundGained, null);
+  assert.deepEqual(sectionRows(null, null, null), []);
 });

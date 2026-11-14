@@ -25,9 +25,8 @@
            <a class="nav-item active" href="#overview" data-page="overview"><span class="nav-index">01</span>Overview</a>
            <a class="nav-item" href="#speed-effort" data-page="speed-effort"><span class="nav-index">02</span>Session overview</a>
            <a class="nav-item" href="#track-water" data-page="track-water"><span class="nav-index">03</span>Track &amp; water</a>
-           <a class="nav-item" href="#ride-segments" data-page="ride-segments"><span class="nav-index">04</span>Ride segments</a>
-           <a class="nav-item" href="#coaching" data-page="coaching"><span class="nav-index">05</span>Coaching &amp; Growth</a>
-           <a class="nav-item" href="#progress" data-page="progress"><span class="nav-index">06</span>Progress</a>
+           <a class="nav-item" href="#coaching" data-page="coaching"><span class="nav-index">04</span>Coaching &amp; Growth</a>
+           <a class="nav-item" href="#progress" data-page="progress"><span class="nav-index">05</span>Progress</a>
         </nav>
 
         <div class="sidebar-bottom">
@@ -285,70 +284,10 @@
          </div>
         </section>
 
-        <section class="ride-segments-page hidden" id="rideSegmentsPage" aria-live="polite">
-          <div class="analysis-hero">
-            <div>
-              <p class="section-number">Ride lab / 04</p>
-              <h1>Find the <em>ride sections.</em></h1>
-              <p class="intro-copy">Start with sustained active movement. Select a section to compare its line, speed, and effort without letting breaks define the average.</p>
-            </div>
-            <div class="analysis-instruction panel">
-              <span class="analysis-instruction-number">01</span>
-               <div><strong>Choose a section</strong><p>The map keeps the whole route visible while highlighting the selected active section.</p></div>
-            </div>
-          </div>
-
-          <section class="analysis-empty panel" id="rideSegmentsEmpty">
-            <p class="empty-kicker">Sections need a ride</p>
-            <h2>Load a session to see<br /><span>the active water.</span></h2>
-            <p>The first pass uses sustained speed windows to separate active movement from breaks and slower transitions. The FIT stays local.</p>
-            <button class="button button-primary" id="segmentsLoadButton" type="button">Choose FIT file <span class="button-icon">+</span></button>
-          </section>
-
-          <div class="segments-body hidden" id="rideSegmentsBody">
-            <div class="analysis-session panel">
-              <div>
-                <p class="panel-kicker">Session in focus</p>
-                <h2 id="segmentsActivityTitle">Kite-surf session</h2>
-                <p id="segmentsActivityDate">Date not available</p>
-              </div>
-              <div class="analysis-session-tag"><span class="pulse-dot"></span>speed-based first pass</div>
-            </div>
-
-            <section class="segments-summary panel">
-              <div class="panel-heading"><div><p class="panel-kicker">Detection summary</p><h3>Speed-segmented track analytics</h3></div><span class="panel-index">CONFIGURABLE</span></div>
-              <p class="segments-summary-copy" id="segmentsSummaryCopy">The track is split into speed-defined sections for comparing active riding, inactive periods, distance, and heart-rate response.</p>
-              <div class="segments-stat-grid">
-                <div class="segments-stat"><span>Active sections</span><strong id="segmentsCount">—</strong><small>short stops bridged</small></div>
-                <div class="segments-stat"><span>Active time</span><strong id="segmentsActiveTime">—</strong><small>usable speed intervals</small></div>
-                <div class="segments-stat"><span>Active average</span><strong id="segmentsAverageSpeed">—</strong><small>time-weighted speed</small></div>
-                <div class="segments-stat"><span>Estimated distance</span><strong id="segmentsDistance">—</strong><small>speed × time</small></div>
-              </div>
-            </section>
-
-            <div class="segments-workspace">
-              <section class="segments-list-panel panel">
-                <div class="panel-heading"><div><p class="panel-kicker">Full session timeline</p><h3>Pick a section</h3></div><span class="chart-unit" id="segmentsListMeta">—</span></div>
-                <div class="segment-list" id="segmentsList" role="list"></div>
-              </section>
-
-              <section class="segments-map-panel panel">
-                <div class="panel-heading">
-                  <div><p class="panel-kicker">Where it happened</p></div>
-                  <span class="chart-unit" id="segmentsMapAccuracy"></span>
-                </div>
-                <div class="segments-map-wrap"><div class="map-tiles" id="segmentsMapTiles" aria-hidden="true"></div><canvas id="segmentsMapCanvas" aria-label="Active ride sections map"></canvas><div class="map-zoom-controls" aria-label="Section map controls"><button type="button" data-map-zoom="in" data-map-zoom-target="segments" aria-label="Zoom in" title="Zoom in">+</button><button type="button" data-map-zoom="out" data-map-zoom-target="segments" aria-label="Zoom out" title="Zoom out">-</button><button type="button" data-map-zoom="fit" data-map-zoom-target="segments" aria-label="Fit section map to track" title="Fit track">fit</button></div><div class="map-attribution">© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap contributors</a></div><div class="chart-empty hidden" id="segmentsMapEmpty">No GPS track in this file</div></div>
-                <div class="chart-footer"><span id="segmentsMapPointCount">0 points</span><span class="segment-map-key"><i></i>active sections</span><span class="map-marker-key"><i class="map-marker-dot start"></i>start position</span><span class="map-marker-key"><i class="map-marker-dot end"></i>end position</span><span>click a section card</span></div>
-              </section>
-            </div>
-
-          </div>
-        </section>
-
         <section class="coaching-page hidden" id="coachingPage" aria-live="polite">
           <div class="analysis-hero">
             <div>
-              <p class="section-number">Ride lab / 05</p>
+              <p class="section-number">Ride lab / 04</p>
               <h1>Coach the <em>next session.</em></h1>
               <p class="intro-copy">Turns, stops, both riding directions, and how the session held up over time, worked out from GPS and speed.</p>
             </div>
@@ -378,7 +317,7 @@
             <section class="analysis-empty panel hidden" id="coachingUnavailable">
               <p class="empty-kicker">Nothing to coach yet</p>
               <h2>No riding was found<br /><span>in this session.</span></h2>
-              <p>Coaching needs at least one stretch of sustained riding speed. Check the ride segments page to see what was detected.</p>
+              <p>Coaching needs at least one stretch of sustained riding speed. Track &amp; water shows what was detected.</p>
             </section>
 
             <div class="coaching-sections" id="coachingSections">
@@ -516,15 +455,6 @@
                     <div class="coaching-legend"><span><i class="track-water-line is-riding"></i>riding</span><span><i class="track-water-line is-idle"></i>not riding</span><span><i class="coaching-swatch is-break"></i>breaks and time ashore</span></div>
                   </div>
                 </div>
-                <details class="coaching-details" id="trackWaterSectionDetails">
-                  <summary><span><span class="when-closed">Show</span><span class="when-open">Hide</span> ground gained in each ride section</span></summary>
-                  <div class="coaching-table-scroll">
-                    <table class="coaching-table">
-                      <thead><tr><th>Ride section</th><th class="is-number">Started at</th><th class="is-number">Ended at</th><th class="is-number">Ground gained</th></tr></thead>
-                      <tbody id="trackWaterSectionBody"></tbody>
-                    </table>
-                  </div>
-                </details>
               </section>
 
               <section class="coaching-panel panel">
@@ -545,6 +475,18 @@
                   </div>
                 </details>
               </section>
+
+              <section class="coaching-panel panel">
+                <div class="panel-heading"><div><p class="panel-kicker">Ride sections</p><h3>What happened in each section</h3></div><span class="chart-unit" id="trackWaterSectionsCount"></span></div>
+                <p class="coaching-copy" id="trackWaterSectionsCopy"></p>
+                <div class="coaching-table-scroll">
+                  <table class="coaching-table track-water-sections-table">
+                    <thead><tr><th>Section</th><th class="is-number">Duration</th><th class="is-number">Distance</th><th class="is-number">Legs</th><th class="is-number">Speed</th><th class="is-number">Heart rate</th><th class="is-number">Stops</th><th class="is-number">Ground gained</th></tr></thead>
+                    <tbody id="trackWaterSectionsBody"></tbody>
+                  </table>
+                </div>
+                <p class="coaching-copy track-water-sections-hint">Select a section to highlight it on the map above.</p>
+              </section>
             </div>
           </div>
         </section>
@@ -553,7 +495,7 @@
           <input id="progressInput" type="file" accept=".fit,.FIT,application/octet-stream" multiple hidden />
           <div class="analysis-hero">
             <div>
-              <p class="section-number">Ride lab / 06</p>
+              <p class="section-number">Ride lab / 05</p>
               <h1>Follow your <em>progress.</em></h1>
               <p class="intro-copy">Load several rides at once and follow a few measures from session to session: speed, turns, stops and how long you stay on the board.</p>
             </div>

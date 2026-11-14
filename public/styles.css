@@ -267,57 +267,31 @@ button { cursor: pointer; }
 .map-marker-dot.start { background: var(--ink); }
 .map-marker-dot.end { background: var(--lime); }
 
-/* Speed-based section review. The section model stays separate from these
-   styles so future movement states can reuse the same visual language. */
-.ride-segments-page { padding: 58px 0 0; }
-.segments-body { display: grid; gap: 10px; }
-.segments-summary { padding: 22px 24px 17px; }
-.segments-summary-copy { max-width: 760px; margin: 14px 0 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+/* Stat tiles and map frames, shared by the coaching and track & water pages. */
 .segments-stat-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 20px -24px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .segments-stat { min-width: 0; padding: 14px 18px; border-right: 1px solid var(--line); }
 .segments-stat:last-child { border-right: 0; }
 .segments-stat span { display: block; color: var(--faint); font: 9px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .7px; text-transform: uppercase; }
 .segments-stat strong { display: block; overflow: hidden; margin-top: 7px; color: var(--ink); font: 400 21px/1 Georgia, serif; text-overflow: ellipsis; white-space: nowrap; }
 .segments-stat small { display: block; margin-top: 7px; color: var(--muted); font-size: 10px; }
-.segments-workspace { display: grid; grid-template-columns: minmax(250px, .72fr) minmax(0, 1.28fr); gap: 10px; }
-.segments-list-panel { min-width: 0; height: 600px; min-height: 0; display: flex; flex-direction: column; padding: 22px 24px 0; }
-.segment-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; margin: 20px -24px 0; border-top: 1px solid var(--line); }
-.segment-card { position: relative; width: 100%; display: grid; grid-template-columns: 18px 1fr auto; gap: 12px; align-items: start; padding: 16px 24px; border: 0; border-bottom: 1px solid var(--line); color: var(--ink); background: transparent; text-align: left; transition: background .16s ease, box-shadow .16s ease; }
-.segment-card:hover, .segment-card:focus-visible { outline: none; background: #f1f4e9; box-shadow: inset 3px 0 0 var(--lime-deep); }
-.segment-card.is-selected { background: #e9eee0; box-shadow: inset 4px 0 0 var(--lime-deep); }
-.segment-card-color { width: 10px; height: 10px; margin-top: 4px; background: var(--segment-color, var(--lime)); }
-.segment-card-title { display: block; font: 400 17px/1.1 Georgia, serif; }
-.segment-card.is-inactive .segment-card-title { color: var(--muted); }
-.segment-card.is-inactive.is-selected .segment-card-title { color: var(--ink); }
-.segment-card-meta { display: block; margin-top: 7px; color: var(--muted); font: 10px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; }
-.segment-card-heart { display: block; margin-top: 4px; color: var(--lime-deep); font: 10px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; }
-.segment-card-speed { color: var(--ink); font: 400 15px/1 Georgia, serif; white-space: nowrap; }
-.segment-card-empty { padding: 22px 24px; color: var(--faint); font: 10px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
-.segments-map-panel { min-width: 0; height: 600px; min-height: 0; display: flex; flex-direction: column; padding: 22px 24px 16px; }
 .segments-map-wrap { position: relative; flex: 1 1 auto; min-height: 0; margin-top: 22px; overflow: hidden; background: #dce8d7; }
 .segments-map-wrap canvas { position: relative; z-index: 2; display: block; width: 100%; height: 100%; cursor: crosshair; touch-action: none; }
-.segment-map-key { display: inline-flex; align-items: center; gap: 6px; }
-.segment-map-key i { width: 15px; height: 3px; display: inline-block; background: var(--lime-deep); }
+.track-water-section-row { cursor: pointer; transition: background .16s ease, box-shadow .16s ease; }
+.track-water-section-row:hover, .track-water-section-row:focus-visible { outline: none; background: #f1f4e9; box-shadow: inset 3px 0 0 var(--lime-deep); }
+.track-water-section-row.is-selected { background: #e9eee0; box-shadow: inset 4px 0 0 var(--lime-deep); }
+.track-water-sections-hint { margin: 12px 0 0; }
+.track-water-sections-table th:first-child, .track-water-sections-table td:first-child { padding-left: 12px; }
 
 @media (max-width: 980px) {
-  .ride-segments-page { padding-top: 43px; }
-  .segments-workspace { grid-template-columns: minmax(0, 1fr); }
-  .segments-list-panel, .segments-map-panel { height: 480px; }
   .segments-map-wrap { min-height: 0; }
 }
 
 @media (max-width: 650px) {
-  .ride-segments-page { padding-top: 33px; }
-  .segments-summary, .segments-list-panel, .segments-map-panel { padding-right: 17px; padding-left: 17px; }
   .segments-stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-right: -17px; margin-left: -17px; }
   .segments-stat { padding-right: 17px; padding-left: 17px; }
   .segments-stat:nth-child(2n) { border-right: 0; }
   .segments-stat:nth-child(n+3) { border-top: 1px solid var(--line); }
-  .segment-list { margin-right: -17px; margin-left: -17px; }
-  .segment-card { padding-right: 17px; padding-left: 17px; }
-  .segments-list-panel, .segments-map-panel { height: 390px; }
   .segments-map-wrap { min-height: 0; height: auto; }
-  .segment-card-heart { display: none; }
 }
 
 /* Coaching. The two riding directions use a colour pair checked for colour-blind

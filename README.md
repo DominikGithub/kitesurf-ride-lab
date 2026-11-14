@@ -28,18 +28,13 @@ Shows where things happen on the water, from the GPS track.
 - **Launch against landing:** how far downwind of the launch you came back in.
 - **Stops:** each stop on the map, drawn at the last GPS fix before it, with a note when most of them happen at one end of your run.
 - **Speed:** the same map with riding stretches coloured by speed.
-
-### Ride segments
-
-![Ride segments](docs/ride-segments-demo.png)
-
-Automatically detected session segments along the recorded track with statistic for each split.
+- **Ride sections:** a table of the riding sections found in the session, with duration, distance, legs between turns, average speed, heart rate, stops and ground gained upwind. A section is a stretch of sustained riding speed; stops shorter than about 25 seconds are bridged and longer breaks split sections. Select a row to highlight that section on the map above.
 
 ### Coaching & Growth
 
 ![Coaching page showing takeaways, turn quality and side balance for a synthetic session](docs/coaching-demo.png)
 
-Turns the detected legs into things to work on. Everything is worked out in the browser from timestamps, speed, heart rate and GPS; only the upwind figures need a wind direction.
+Turns the legs found in each ride section into things to work on. Everything is worked out in the browser from timestamps, speed, heart rate and GPS; only the upwind figures need a wind direction.
 
 - **Session takeaways:** up to three rule-based observations that do not repeat each other, such as a weaker turning side or where most stops happen, with one slot kept for something that went well.
 - **Turn quality:** for every turn between two legs, the share of entry speed kept, the time to get back to speed, and whether the turn ended in a stop. Every turn is also marked on a map beside the chart: hover a turn in either one to find it in the other and see the stretch ridden into and out of it. A table of all turns is below.

@@ -232,3 +232,25 @@ export function analyzeTrackWater(segmentation, coaching, { recordWind = null, o
     cluster,
   };
 }
+
+// One row per active ride section for the sections table: its own figures, the stops that happened in it or right after it, and the ground gained upwind when there is a wind direction.
+export function sectionRows(segmentation, coaching, analysis) {
+  const stops = (coaching?.stops ?? []).filter((stop) => stop.kind === "stop");
+  const upwindById = new Map((analysis?.upwind?.sections ?? []).map((entry) => [entry.id, entry]));
+  const sections = segmentation?.activeSections ?? [];
+  // A stop that splits two sections happens between them, so it counts for the section it follows.
+  return sections.map((section, position) => ({
+    id: section.id,
+    label: section.label,
+    startTimestamp: section.startTimestamp,
+    endTimestamp: section.endTimestamp,
+    duration: section.duration,
+    distance: section.distance,
+    legCount: section.legs.length,
+    averageSpeed: section.averageSpeed,
+    averageHeartRate: section.averageHeartRate,
+    heartRateTrend: section.heartRateTrend,
+    stopCount: stops.filter((stop) => stop.startTimestamp >= section.startTimestamp && stop.startTimestamp < (sections[position + 1]?.startTimestamp ?? Infinity)).length,
+    groundGained: upwindById.get(section.id)?.netMetres ?? null,
+  }));
+}

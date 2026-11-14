@@ -2,8 +2,8 @@ import { dateFromFit, decodeFit, getField } from "./fit-decoder.js";
 import { analyzeCoaching } from "./coaching.js";
 import { createDemoActivity, createDemoSeries } from "./demo-session.js";
 import { DEFAULT_PROGRESS_METRICS, PROGRESS_KINDS, PROGRESS_METRICS, describeChange, sameSession, sortSessions, summarizeSession } from "./progress.js";
-import { sectionContainsIndex, segmentTrack } from "./track-segmentation.js";
-import { analyzeTrackWater } from "./track-water.js";
+import { segmentTrack } from "./track-segmentation.js";
+import { analyzeTrackWater, sectionRows } from "./track-water.js";
 import { calculateWindCoaching, resolveWindAnnotation, summarizeAnnotatedWind } from "./wind-annotation.js";
 
 const $ = (selector) => document.querySelector(selector);
@@ -18,11 +18,8 @@ const mapCanvas = $("#mapCanvas");
 const mapTiles = $("#mapTiles");
 const overviewIntro = $("#overviewIntro");
 const speedEffortPage = $("#speedEffortPage");
-const rideSegmentsPage = $("#rideSegmentsPage");
 const analysisEmpty = $("#analysisEmpty");
 const analysisBody = $("#analysisBody");
-const rideSegmentsEmpty = $("#rideSegmentsEmpty");
-const rideSegmentsBody = $("#rideSegmentsBody");
 const analysisSpeedCanvas = $("#analysisSpeedChart");
 const analysisHeartCanvas = $("#analysisHeartChart");
 const analysisWindCanvas = $("#analysisWindChart");
@@ -32,9 +29,6 @@ const analysisMapWindIndicator = $("#analysisMapWindIndicator");
 const inventoryToggle = $("#inventoryToggle");
 const inventoryTableWrap = $("#inventoryTableWrap");
 const analysisMapTiles = $("#analysisMapTiles");
-const segmentsMapCanvas = $("#segmentsMapCanvas");
-const segmentsMapTiles = $("#segmentsMapTiles");
-const segmentsList = $("#segmentsList");
 const coachingPage = $("#coachingPage");
 const coachingEmpty = $("#coachingEmpty");
 const coachingBody = $("#coachingBody");
@@ -54,16 +48,13 @@ const isDemoMode = new URLSearchParams(window.location.search).has("demo");
 const OVERVIEW_POINT_LIMIT = 720;
 const MAP_POINT_LIMIT = 720;
 const ANALYSIS_POINT_LIMIT = 900;
-const SEGMENT_COLORS = ["#b8d354", "#d77a61", "#e0a463", "#6c9296", "#8eaa2d", "#965743", "#4f8f83", "#b28bca", "#c49a5a", "#5b7891"];
 
 let currentActivity = null;
 let visualFrame = null;
 let analysisSelectionIndex = null;
 let analysisRenderState = { speed: null, heart: null, wind: null, map: null };
-let selectedSegmentIndex = null;
-let segmentRenderState = { map: null };
 let coachingRenderState = { marks: [], mapMarks: [], hoveredTurn: null, coaching: null };
-const emptyTrackWaterState = (mode = "stops") => ({ mode, analysis: null, chart: null, hoveredPoint: null, hoveredEvent: null, hoveredMapPoint: null, mapMarks: [], mapPoints: [] });
+const emptyTrackWaterState = (mode = "stops") => ({ mode, selectedSectionId: null, analysis: null, chart: null, hoveredPoint: null, hoveredEvent: null, hoveredMapPoint: null, mapMarks: [], mapPoints: [] });
 let trackWaterRenderState = emptyTrackWaterState();
 // The progress page keeps its own list of rides, independent of the ride open on the other pages.
 const progressState = { sessions: [], selected: new Set(DEFAULT_PROGRESS_METRICS), cards: [], hoveredIndex: null, nextId: 0, busy: false, windBusy: false, demoLoaded: false };
@@ -713,129 +704,8 @@ function drawMap(canvas, records, options = {}) {
   };
 }
 
-function sectionColor(index) {
-  return SEGMENT_COLORS[index % SEGMENT_COLORS.length];
-}
-
-function drawSectionMarker(context, point, label, selected, color) {
-  context.fillStyle = "rgba(251, 252, 248, .96)";
-  context.strokeStyle = selected ? "#17252a" : color;
-  context.lineWidth = selected ? 3 : 2;
-  context.beginPath();
-  context.arc(point.x, point.y, selected ? 11 : 8, 0, Math.PI * 2);
-  context.fill();
-  context.stroke();
-  context.fillStyle = selected ? "#17252a" : color;
-  context.font = "700 9px ui-monospace, SFMono-Regular, Menlo, monospace";
-  context.textAlign = "center";
-  context.textBaseline = "middle";
-  context.fillText(label, point.x, point.y + .5);
-}
-
-function drawSegmentedMap(canvas, segmentation, options = {}) {
-  const wrapper = canvas.parentElement;
-  canvas.style.display = "block";
-  const width = Math.max(240, Math.floor(wrapper.clientWidth));
-  const height = Math.max(260, Math.floor(wrapper.clientHeight));
-  const ratio = Math.min(window.devicePixelRatio || 1, 1.5);
-  canvas.width = width * ratio;
-  canvas.height = height * ratio;
-  canvas.style.width = `${width}px`;
-  canvas.style.height = `${height}px`;
-  const context = canvas.getContext("2d");
-  context.setTransform(ratio, 0, 0, ratio, 0, 0);
-  context.clearRect(0, 0, width, height);
-
-  const routePoints = segmentation.routeRuns.flat();
-  const tileContainer = options.tileContainer ?? segmentsMapTiles;
-  if (routePoints.length < 2) {
-    tileContainer.replaceChildren();
-    mapLayoutCache.delete(tileContainer);
-    return { visible: false, count: routePoints.length, nearestSectionForPoint: () => null };
-  }
-
-  const bounds = routePoints.reduce((result, point) => ({
-    minLatitude: Math.min(result.minLatitude, point.latitude),
-    maxLatitude: Math.max(result.maxLatitude, point.latitude),
-    minLongitude: Math.min(result.minLongitude, point.longitude),
-    maxLongitude: Math.max(result.maxLongitude, point.longitude),
-  }), { minLatitude: 90, maxLatitude: -90, minLongitude: 180, maxLongitude: -180 });
-  const requestedZoom = mapZoomState.get(tileContainer) ?? null;
-  const pan = mapPanState.get(tileContainer) ?? { x: 0, y: 0 };
-  const layoutKey = [width, height, routePoints.length, bounds.minLatitude.toFixed(6), bounds.maxLatitude.toFixed(6), bounds.minLongitude.toFixed(6), bounds.maxLongitude.toFixed(6), requestedZoom ?? "auto", pan.x.toFixed(1), pan.y.toFixed(1)].join(":");
-  const cachedLayout = mapLayoutCache.get(tileContainer);
-  const map = cachedLayout?.key === layoutKey ? cachedLayout.map : loadMapTiles(routePoints, width, height, tileContainer, requestedZoom);
-  if (cachedLayout?.key !== layoutKey) mapLayoutCache.set(tileContainer, { key: layoutKey, map });
-  const project = (point) => {
-    const projected = webMercatorPoint(point, map.zoom);
-    return { x: projected.x - map.viewportLeft, y: projected.y - map.viewportTop, index: point.index };
-  };
-  const projectedRuns = segmentation.routeRuns.map((run) => run.map(project));
-  const projectedPoints = projectedRuns.flat();
-  const selected = typeof options.selectedIndex === "number" ? segmentation.sections[options.selectedIndex] : null;
-
-  projectedRuns.forEach((run) => drawRoute(context, run, "rgba(255, 255, 255, .9)", 7));
-  projectedRuns.forEach((run) => drawRoute(context, run, "#879793", 2.5));
-  segmentation.sections.forEach((section, index) => {
-    const isSelected = selected ? selected.id === section.id : false;
-    const color = isSelected ? "#b8d354" : section.type === "active" && !selected ? sectionColor(index) : "rgba(126, 141, 137, .55)";
-    const width = isSelected ? 6 : selected ? 2 : 4;
-    projectedRuns.forEach((run) => drawRoute(context, run, color, width, (start, end) => sectionContainsIndex(section, (start.index + end.index) / 2)));
-  });
-
-  const sectionMarkers = segmentation.sections.map((section, index) => {
-    const points = projectedPoints.filter((point) => sectionContainsIndex(section, point.index));
-    if (!points.length) return null;
-    return { point: points[Math.floor(points.length / 2)], index };
-  }).filter(Boolean);
-  sectionMarkers.forEach(({ point, index }) => {
-    const section = segmentation.sections[index];
-    const color = section.type === "active" ? sectionColor(index) : "#9ba5a3";
-    drawSectionMarker(context, point, String(index + 1), selected?.id === section.id, color);
-  });
-
-  // Turn points between the legs of the selected section.
-  (selected?.legs ?? []).slice(1).forEach((leg) => {
-    const point = projectedPoints.find((candidate) => candidate.index >= leg.startIndex);
-    if (!point) return;
-    context.fillStyle = "#fbfcf8";
-    context.strokeStyle = "#17252a";
-    context.lineWidth = 1.5;
-    context.beginPath();
-    context.arc(point.x, point.y, 3.5, 0, Math.PI * 2);
-    context.fill();
-    context.stroke();
-  });
-
-  const start = projectedPoints[0];
-  const finish = projectedPoints.at(-1);
-  context.fillStyle = "#17252a";
-  context.beginPath();
-  context.arc(start.x, start.y, 5, 0, Math.PI * 2);
-  context.fill();
-  context.fillStyle = "#b8d354";
-  context.beginPath();
-  context.arc(finish.x, finish.y, 5, 0, Math.PI * 2);
-  context.fill();
-
-  return {
-    visible: true,
-    count: routePoints.length,
-    nearestSectionForPoint(pointerX, pointerY) {
-      const nearest = projectedPoints.reduce((candidate, point) => {
-        const distance = (point.x - pointerX) ** 2 + (point.y - pointerY) ** 2;
-        const candidateDistance = (candidate.x - pointerX) ** 2 + (candidate.y - pointerY) ** 2;
-        return distance < candidateDistance ? point : candidate;
-      }, projectedPoints[0]);
-      const section = segmentation.sections.find((item) => sectionContainsIndex(item, nearest.index));
-      return section ? section.id : null;
-    },
-  };
-}
-
 function mapContainerForTarget(target) {
   if (target === "analysis") return analysisMapTiles;
-  if (target === "segments") return segmentsMapTiles;
   if (target === "track-water") return trackWaterMapTiles;
   if (target === "coaching") return coachingMapTiles;
   return mapTiles;
@@ -1098,77 +968,6 @@ function renderAnalysis(summary) {
   renderAnalysisReadout(summary);
 }
 
-function renderSegmentList(segmentation) {
-  segmentsList.replaceChildren();
-  if (!segmentation.sections.length) {
-    const empty = document.createElement("p");
-    empty.className = "segment-card-empty";
-    empty.textContent = "No sections were detected in this session.";
-    segmentsList.append(empty);
-    return;
-  }
-  segmentation.sections.forEach((section, index) => {
-    const card = document.createElement("button");
-    card.className = `segment-card${section.type === "inactive" ? " is-inactive" : ""}${selectedSegmentIndex === index ? " is-selected" : ""}`;
-    card.type = "button";
-    card.dataset.segmentIndex = String(index);
-    card.setAttribute("aria-pressed", selectedSegmentIndex === index ? "true" : "false");
-    card.style.setProperty("--segment-color", section.type === "active" ? sectionColor(index) : "#9ba5a3");
-
-    const color = document.createElement("i");
-    color.className = "segment-card-color";
-    color.setAttribute("aria-hidden", "true");
-    const body = document.createElement("span");
-    const title = document.createElement("strong");
-    title.className = "segment-card-title";
-    title.textContent = section.label;
-    const meta = document.createElement("small");
-    meta.className = "segment-card-meta";
-    meta.textContent = `${formatTime(section.startTimestamp)} · ${formatDuration(section.duration)} · ${formatDistance(section.distance)}`;
-    body.append(title, meta);
-    if (section.legs.length) {
-      const legs = document.createElement("small");
-      legs.className = "segment-card-meta";
-      legs.textContent = `${number(section.legs.length)} ${section.legs.length === 1 ? "leg" : "legs"} · median ${formatDuration(section.medianLegDuration)}`;
-      body.append(legs);
-    }
-    if (section.averageHeartRate !== null) {
-      const heart = document.createElement("small");
-      heart.className = "segment-card-heart";
-      const trend = section.heartRateTrend === null ? "" : ` · trend ${section.heartRateTrend >= 0 ? "+" : "-"}${number(Math.abs(section.heartRateTrend), 0)} bpm`;
-      heart.textContent = `HR ${number(section.averageHeartRate, 0)} bpm${trend}`;
-      body.append(heart);
-    }
-    const speed = document.createElement("strong");
-    speed.className = "segment-card-speed";
-    speed.textContent = formatSpeed(section.averageSpeed);
-    card.append(color, body, speed);
-    segmentsList.append(card);
-  });
-}
-
-function renderRideSegments(summary) {
-  const segmentation = summary.segmentation;
-  renderSegmentList(segmentation);
-  const map = drawSegmentedMap(segmentsMapCanvas, segmentation, {
-    tileContainer: segmentsMapTiles,
-    selectedIndex: selectedSegmentIndex,
-  });
-  segmentRenderState = { map };
-  const averageSpeed = segmentation.averageActiveSpeed;
-  setText("#segmentsCount", number(segmentation.activeSections.length));
-  setText("#segmentsActiveTime", formatDuration(segmentation.activeDuration));
-  setText("#segmentsAverageSpeed", formatSpeed(averageSpeed));
-  setText("#segmentsDistance", formatDistance(segmentation.activeDistance));
-  setText("#segmentsSummaryCopy", `The track is split into speed-defined sections for comparing active riding, inactive periods, distance, and heart-rate response. An active section is at least ${number(segmentation.options.minimumActiveSeconds)} seconds where the ${number(segmentation.options.smoothingSeconds)}-second median speed stays above ${formatSpeed(segmentation.options.activeSpeedMps)}, with stops shorter than ${number(segmentation.options.mergeGapSeconds)} seconds bridged. Active sections are divided into legs at turns; ${number(segmentation.legCount)} ${segmentation.legCount === 1 ? "leg was" : "legs were"} found. The complete timeline is shown below.`);
-  setText("#segmentsListMeta", `${number(segmentation.sections.length)} detected`);
-  setText("#segmentsMapAccuracy", summary.gpsAccuracy === null ? "" : `avg GPS ±${number(summary.gpsAccuracy, 1)} m`);
-  setText("#segmentsMapPointCount", `${number(map.count)} points`);
-  setText("#segmentsActivityTitle", sessionTitle(summary));
-  setText("#segmentsActivityDate", formatDate(summary.starts));
-  $("#segmentsMapEmpty").classList.toggle("hidden", map.visible);
-}
-
 function setAnalysisSelection(index) {
   if (analysisSelectionIndex === index) return;
   analysisSelectionIndex = index;
@@ -1241,16 +1040,6 @@ function bindAnalysisInteractions() {
     setAnalysisSelection(renderState.nearestIndexForPoint(position.x, position.y));
   });
   analysisMapCanvas.addEventListener("pointerleave", clearAnalysisSelection);
-}
-
-function bindSegmentInteractions() {
-  segmentsList.addEventListener("click", (event) => {
-    const card = event.target.closest("[data-segment-index]");
-    if (!card || !currentActivity) return;
-    const segmentIndex = Number(card.dataset.segmentIndex);
-    selectedSegmentIndex = selectedSegmentIndex === segmentIndex ? null : segmentIndex;
-    scheduleVisualRender();
-  });
 }
 
 const COACHING_SIDE_COLORS = ["#2a78d6", "#eb6834"];
@@ -2017,9 +1806,7 @@ function showTrackWaterChartTooltip(point) {
 function renderTrackWaterUpwind(analysis, summary, coaching) {
   const { wind, launchLanding } = analysis;
   const plots = $("#trackWaterPlots");
-  const details = $("#trackWaterSectionDetails");
   plots.classList.toggle("hidden", !wind);
-  details.classList.toggle("hidden", !wind);
   setText("#trackWaterWindSource", wind ? `${windStatusText(summary.wind)} · from ${formatWindDirection(wind.direction)}` : "");
 
   const edgeNote = launchLanding.startedRiding || launchLanding.endedRiding
@@ -2035,7 +1822,6 @@ function renderTrackWaterUpwind(analysis, summary, coaching) {
       statTile("Highest point", "—", "needs a wind direction"),
       statTile("Lowest point", "—", "needs a wind direction"),
     );
-    $("#trackWaterSectionBody").replaceChildren();
     trackWaterRenderState.hoveredPoint = null;
     showTrackWaterChartTooltip(null);
     return;
@@ -2059,18 +1845,6 @@ function renderTrackWaterUpwind(analysis, summary, coaching) {
     statTile("Lowest point", formatSignedDistance(lowest.metres), `against the launch, at ${formatTime(lowest.timestamp)}`),
     statTile("Most ground gained", best ? formatSignedDistance(best.netMetres) : "—", best ? `in ${best.label.toLowerCase()}` : "no ride section with a track"),
   );
-  $("#trackWaterSectionBody").replaceChildren(...sections.map((section) => {
-    const row = element("tr");
-    const name = element("td", "", section.label);
-    name.append(element("small", "", `${formatTime(section.startTimestamp)} – ${formatTime(section.endTimestamp)}`));
-    row.append(
-      name,
-      element("td", "is-number", formatSignedDistance(section.startMetres)),
-      element("td", "is-number", formatSignedDistance(section.endMetres)),
-      element("td", "is-number", formatSignedDistance(section.netMetres)),
-    );
-    return row;
-  }));
 
   if (!analysis.points.includes(trackWaterRenderState.hoveredPoint)) {
     trackWaterRenderState.hoveredPoint = null;
@@ -2118,10 +1892,18 @@ function drawTrackWaterMap(analysis) {
 
   strokeTrack(context, points, projected, () => true, "rgba(255, 255, 255, .9)", speedMode ? 7 : 5.5);
   strokeTrack(context, points, projected, (point) => !point.riding, "#879793", 2);
+  const selectedId = trackWaterRenderState.selectedSectionId;
+  const selected = (point) => selectedId !== null && point.sectionId === selectedId;
+  const dimmed = (point) => selectedId !== null && point.sectionId !== selectedId;
+  if (selectedId !== null) {
+    strokeTrack(context, points, projected, (point) => point.riding && dimmed(point), "rgba(135, 151, 147, .5)", 2);
+    strokeTrack(context, points, projected, selected, "rgba(255, 255, 255, .95)", 8);
+    strokeTrack(context, points, projected, selected, "#17252a", 5);
+  }
   if (speedMode) {
-    TRACK_WATER_SPEED_COLORS.forEach((color, step) => strokeTrack(context, points, projected, (point) => point.riding && point.speedStep === step, color, 3));
+    TRACK_WATER_SPEED_COLORS.forEach((color, step) => strokeTrack(context, points, projected, (point) => point.riding && point.speedStep === step && !dimmed(point), color, 3));
   } else {
-    strokeTrack(context, points, projected, (point) => point.riding, "rgba(23, 37, 42, .62)", 2.25);
+    strokeTrack(context, points, projected, (point) => point.riding && !dimmed(point), selectedId === null ? "rgba(23, 37, 42, .62)" : "#b8d354", selectedId === null ? 2.25 : 2.5);
   }
   drawDot(context, project(analysis.launch), 6, "#17252a");
   drawDot(context, project(analysis.landing), 3.5, "#b8d354", "#17252a");
@@ -2224,6 +2006,40 @@ function renderTrackWaterMap(analysis) {
   $("#trackWaterStopBody").replaceChildren(...rows);
 }
 
+function renderTrackWaterSections(analysis, summary) {
+  const { segmentation } = summary;
+  const rows = sectionRows(segmentation, coachingFor(summary), analysis);
+  const { options } = segmentation;
+  setText("#trackWaterSectionsCount", `${number(rows.length)} ${rows.length === 1 ? "section" : "sections"}`);
+  setText("#trackWaterSectionsCopy", `A ride section is at least ${number(options.minimumActiveSeconds)} seconds where the ${number(options.smoothingSeconds)}-second median speed stays above ${formatSpeed(options.activeSpeedMps)}, with stops shorter than ${number(options.mergeGapSeconds)} seconds bridged. Longer breaks split one section from the next, and ${number(segmentation.legCount)} ${segmentation.legCount === 1 ? "leg was" : "legs were"} found between turns. A stop is counted for the section it happens in or right after.`);
+  if (!rows.some((row) => row.id === trackWaterRenderState.selectedSectionId)) trackWaterRenderState.selectedSectionId = null;
+  $("#trackWaterSectionsBody").replaceChildren(...rows.map((row) => {
+    const selected = row.id === trackWaterRenderState.selectedSectionId;
+    const tableRow = element("tr", `track-water-section-row${selected ? " is-selected" : ""}`);
+    tableRow.dataset.sectionId = row.id;
+    tableRow.tabIndex = 0;
+    tableRow.setAttribute("aria-pressed", String(selected));
+    const name = element("td", "", row.label);
+    name.append(element("small", "", `${formatTime(row.startTimestamp)} – ${formatTime(row.endTimestamp)}`));
+    const heart = element("td", "is-number", row.averageHeartRate === null ? "—" : `${number(row.averageHeartRate, 0)} bpm`);
+    if (row.averageHeartRate !== null && row.heartRateTrend !== null) {
+      const trend = Math.round(row.heartRateTrend);
+      heart.append(element("small", "", `trend ${trend === 0 ? "level" : `${trend > 0 ? "+" : "−"}${number(Math.abs(trend), 0)} bpm`}`));
+    }
+    tableRow.append(
+      name,
+      element("td", "is-number", formatDuration(row.duration)),
+      element("td", "is-number", formatDistance(row.distance)),
+      element("td", "is-number", number(row.legCount)),
+      element("td", "is-number", formatSpeed(row.averageSpeed)),
+      heart,
+      element("td", "is-number", number(row.stopCount)),
+      element("td", "is-number", formatSignedDistance(row.groundGained)),
+    );
+    return tableRow;
+  }));
+}
+
 function renderTrackWater(summary) {
   const analysis = trackWaterFor(summary);
   setText("#trackWaterActivityTitle", sessionTitle(summary));
@@ -2234,6 +2050,7 @@ function renderTrackWater(summary) {
   if (!analysis.available) return;
   renderTrackWaterUpwind(analysis, summary, coachingFor(summary));
   renderTrackWaterMap(analysis);
+  renderTrackWaterSections(analysis, summary);
 }
 
 function bindTrackWaterInteractions() {
@@ -2304,6 +2121,20 @@ function bindTrackWaterInteractions() {
     ], mark.x, mark.y);
   });
   trackWaterMapCanvas.addEventListener("pointerleave", clearMapHover);
+
+  const toggleSection = (row) => {
+    if (!row || !trackWaterRenderState.analysis) return;
+    const sectionId = Number(row.dataset.sectionId);
+    trackWaterRenderState.selectedSectionId = trackWaterRenderState.selectedSectionId === sectionId ? null : sectionId;
+    if (currentActivity) scheduleVisualRender();
+  };
+  const sectionsBody = $("#trackWaterSectionsBody");
+  sectionsBody.addEventListener("click", (event) => toggleSection(event.target.closest("[data-section-id]")));
+  sectionsBody.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    toggleSection(event.target.closest("[data-section-id]"));
+  });
 
   document.querySelectorAll("[data-track-water-mode]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -2775,17 +2606,16 @@ function bindProgressInteractions() {
 
 function activePage() {
   const page = window.location.hash.slice(1);
-  return ["overview", "speed-effort", "track-water", "ride-segments", "coaching", "progress"].includes(page) ? page : "overview";
+  return ["overview", "speed-effort", "track-water", "coaching", "progress"].includes(page) ? page : "overview";
 }
 
 function updatePage() {
   const page = activePage();
   const overviewActive = page === "overview";
   const analysisActive = page === "speed-effort";
-  const segmentsActive = page === "ride-segments";
   const coachingActive = page === "coaching";
   const trackWaterActive = page === "track-water";
-  setText("#pageLabel", { overview: "overview", "speed-effort": "session overview", "track-water": "track & water", "ride-segments": "ride segments", coaching: "coaching", progress: "progress" }[page]);
+  setText("#pageLabel", { overview: "overview", "speed-effort": "session overview", "track-water": "track & water", coaching: "coaching", progress: "progress" }[page]);
   const progressActive = page === "progress";
   progressPage.classList.toggle("hidden", !progressActive);
   if (progressActive && isDemoMode) loadProgressDemo();
@@ -2796,9 +2626,6 @@ function updatePage() {
   speedEffortPage.classList.toggle("hidden", !analysisActive);
   analysisEmpty.classList.toggle("hidden", Boolean(currentActivity) || !analysisActive);
   analysisBody.classList.toggle("hidden", !currentActivity || !analysisActive);
-  rideSegmentsPage.classList.toggle("hidden", !segmentsActive);
-  rideSegmentsEmpty.classList.toggle("hidden", Boolean(currentActivity) || !segmentsActive);
-  rideSegmentsBody.classList.toggle("hidden", !currentActivity || !segmentsActive);
   coachingPage.classList.toggle("hidden", !coachingActive);
   coachingEmpty.classList.toggle("hidden", Boolean(currentActivity) || !coachingActive);
   coachingBody.classList.toggle("hidden", !currentActivity || !coachingActive);
@@ -2819,7 +2646,6 @@ function scheduleVisualRender() {
     }
     if (!currentActivity) return;
     if (page === "speed-effort") renderAnalysis(currentActivity);
-    else if (page === "ride-segments") renderRideSegments(currentActivity);
     else if (page === "coaching") renderCoaching(currentActivity);
     else if (page === "track-water") renderTrackWater(currentActivity);
     else renderCharts(currentActivity);
@@ -2930,24 +2756,19 @@ function renderInventory(activity) {
 function render(activity, fileName) {
   mapZoomState.delete(mapTiles);
   mapZoomState.delete(analysisMapTiles);
-  mapZoomState.delete(segmentsMapTiles);
   mapZoomState.delete(trackWaterMapTiles);
   mapZoomState.delete(coachingMapTiles);
   mapPanState.delete(mapTiles);
   mapPanState.delete(analysisMapTiles);
-  mapPanState.delete(segmentsMapTiles);
   mapPanState.delete(trackWaterMapTiles);
   mapPanState.delete(coachingMapTiles);
   mapLayoutCache.delete(mapTiles);
   mapLayoutCache.delete(analysisMapTiles);
-  mapLayoutCache.delete(segmentsMapTiles);
   mapLayoutCache.delete(trackWaterMapTiles);
   mapLayoutCache.delete(coachingMapTiles);
   currentActivity = summarize(activity);
   currentActivity.segmentation = segmentTrack(currentActivity.records);
   analysisSelectionIndex = null;
-  selectedSegmentIndex = null;
-  segmentRenderState = { map: null };
   coachingRenderState = { marks: [], mapMarks: [], hoveredTurn: null, coaching: null };
   trackWaterRenderState = emptyTrackWaterState(trackWaterRenderState.mode);
   analysisMapFocus = null;
@@ -3043,7 +2864,6 @@ input.addEventListener("change", () => {
 });
 $("#newFileButton").addEventListener("click", () => input.click());
 $("#analysisLoadButton").addEventListener("click", () => input.click());
-$("#segmentsLoadButton").addEventListener("click", () => input.click());
 $("#coachingLoadButton").addEventListener("click", () => input.click());
 $("#trackWaterLoadButton").addEventListener("click", () => input.click());
 $("#dismissError").addEventListener("click", hideError);
@@ -3087,12 +2907,10 @@ window.addEventListener("resize", () => {
 });
 
 bindAnalysisInteractions();
-bindSegmentInteractions();
 bindCoachingInteractions();
 bindProgressInteractions();
 bindTrackWaterInteractions();
 bindMapPanning(analysisMapCanvas, analysisMapTiles);
-bindMapPanning(segmentsMapCanvas, segmentsMapTiles);
 bindMapPanning(trackWaterMapCanvas, trackWaterMapTiles);
 bindMapPanning(coachingMapCanvas, coachingMapTiles);
 
