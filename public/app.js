@@ -1,7 +1,9 @@
 import { dateFromFit, decodeFit, getField } from "./fit-decoder.js";
 import { analyzeCoaching } from "./coaching.js";
 import { createDemoActivity, createDemoSeries } from "./demo-session.js";
+import { resolvePage } from "./pages.js";
 import { DEFAULT_PROGRESS_METRICS, PROGRESS_KINDS, PROGRESS_METRICS, describeChange, sameSession, sortSessions, summarizeSession } from "./progress.js";
+import { applyTheme, chartFont, currentTheme, fade, otherTheme, palette, storedTheme } from "./theme.js";
 import { segmentTrack } from "./track-segmentation.js";
 import { analyzeTrackWater, sectionRows } from "./track-water.js";
 import { calculateWindCoaching, resolveWindAnnotation, summarizeAnnotatedWind } from "./wind-annotation.js";
@@ -12,11 +14,10 @@ const emptyState = $("#emptyState");
 const dashboard = $("#dashboard");
 const dropTarget = $("#dropTarget");
 const errorBanner = $("#errorBanner");
-const speedCanvas = $("#speedChart");
+const sessionStrip = $("#sessionStrip");
 const heartCanvas = $("#heartChart");
-const mapCanvas = $("#mapCanvas");
-const mapTiles = $("#mapTiles");
-const overviewIntro = $("#overviewIntro");
+const bodyPage = $("#bodyPage");
+const bodyEmpty = $("#bodyEmpty");
 const speedEffortPage = $("#speedEffortPage");
 const analysisEmpty = $("#analysisEmpty");
 const analysisBody = $("#analysisBody");
@@ -24,13 +25,11 @@ const analysisSpeedCanvas = $("#analysisSpeedChart");
 const analysisHeartCanvas = $("#analysisHeartChart");
 const analysisWindCanvas = $("#analysisWindChart");
 const analysisMapCanvas = $("#analysisMapCanvas");
-const mapWindIndicator = $("#mapWindIndicator");
 const analysisMapWindIndicator = $("#analysisMapWindIndicator");
 const inventoryToggle = $("#inventoryToggle");
 const inventoryTableWrap = $("#inventoryTableWrap");
 const analysisMapTiles = $("#analysisMapTiles");
 const coachingPage = $("#coachingPage");
-const coachingEmpty = $("#coachingEmpty");
 const coachingBody = $("#coachingBody");
 const coachingTurnCanvas = $("#coachingTurnChart");
 const coachingMapCanvas = $("#coachingMapCanvas");
@@ -292,11 +291,13 @@ function drawChart(canvas, values, options = {}) {
   const x = (index) => padding.left + (index / Math.max(clean.length - 1, 1)) * (width - padding.left - padding.right);
   const y = (value) => height - padding.bottom - ((value - min) / range) * (height - padding.top - padding.bottom);
 
-  context.fillStyle = "#9ba5a3";
-  context.font = "9px ui-monospace, SFMono-Regular, Menlo, monospace";
+  const colours = palette();
+  const lineColour = options.line ?? colours.speed;
+  context.fillStyle = colours.label;
+  context.font = chartFont(10);
   context.textAlign = "right";
   context.textBaseline = "middle";
-  context.strokeStyle = "rgba(55, 77, 80, 0.16)";
+  context.strokeStyle = colours.grid;
   context.lineWidth = 1;
   for (let line = 0; line < 4; line += 1) {
     const lineY = padding.top + (line / 3) * (height - padding.top - padding.bottom);
@@ -309,8 +310,8 @@ function drawChart(canvas, values, options = {}) {
   }
 
   const gradient = context.createLinearGradient(0, padding.top, 0, height);
-  gradient.addColorStop(0, options.fillTop ?? "rgba(195, 224, 78, 0.32)");
-  gradient.addColorStop(1, options.fillBottom ?? "rgba(195, 224, 78, 0.02)");
+  gradient.addColorStop(0, fade(lineColour, 0.28));
+  gradient.addColorStop(1, fade(lineColour, 0.02));
   context.beginPath();
   clean.forEach((value, index) => {
     if (index === 0) context.moveTo(x(index), y(value));
@@ -327,12 +328,12 @@ function drawChart(canvas, values, options = {}) {
     if (index === 0) context.moveTo(x(index), y(value));
     else context.lineTo(x(index), y(value));
   });
-  context.strokeStyle = options.line ?? "#afc84c";
+  context.strokeStyle = lineColour;
   context.lineWidth = 2;
   context.lineJoin = "round";
   context.lineCap = "round";
   context.stroke();
-  context.fillStyle = options.line ?? "#afc84c";
+  context.fillStyle = lineColour;
   context.beginPath();
   context.arc(x(clean.length - 1), y(clean[clean.length - 1]), 3.5, 0, Math.PI * 2);
   context.fill();
@@ -386,10 +387,12 @@ function drawLinkedChart(canvas, records, valueFor, options = {}, selectedIndex 
   const range = max - min || 1;
   const y = (value) => height - padding.bottom - ((value - min) / range) * (height - padding.top - padding.bottom);
 
-  context.strokeStyle = "rgba(55, 77, 80, 0.16)";
+  const colours = palette();
+  const lineColour = options.line ?? colours.speed;
+  context.strokeStyle = colours.grid;
   context.lineWidth = 1;
-  context.fillStyle = "#9ba5a3";
-  context.font = "9px ui-monospace, SFMono-Regular, Menlo, monospace";
+  context.fillStyle = colours.label;
+  context.font = chartFont(10);
   context.textAlign = "right";
   context.textBaseline = "middle";
   for (let line = 0; line < 4; line += 1) {
@@ -404,8 +407,8 @@ function drawLinkedChart(canvas, records, valueFor, options = {}, selectedIndex 
 
   const visiblePoints = downsampleSeries(points, Math.min(ANALYSIS_POINT_LIMIT, Math.max(220, Math.ceil(width * 1.7))));
   const gradient = context.createLinearGradient(0, padding.top, 0, height);
-  gradient.addColorStop(0, options.fillTop ?? "rgba(184, 211, 84, .30)");
-  gradient.addColorStop(1, options.fillBottom ?? "rgba(184, 211, 84, .02)");
+  gradient.addColorStop(0, fade(lineColour, 0.28));
+  gradient.addColorStop(1, fade(lineColour, 0.02));
   context.beginPath();
   visiblePoints.forEach((point, index) => {
     if (index === 0) context.moveTo(x(point.index), y(point.value));
@@ -422,7 +425,7 @@ function drawLinkedChart(canvas, records, valueFor, options = {}, selectedIndex 
     if (index === 0) context.moveTo(x(point.index), y(point.value));
     else context.lineTo(x(point.index), y(point.value));
   });
-  context.strokeStyle = options.line ?? "#b8d354";
+  context.strokeStyle = lineColour;
   context.lineWidth = 2;
   context.lineJoin = "round";
   context.lineCap = "round";
@@ -431,7 +434,7 @@ function drawLinkedChart(canvas, records, valueFor, options = {}, selectedIndex 
   const activePoint = selectedIndex === null ? null : nearestSeriesPoint(points, selectedIndex);
   if (selectedIndex !== null) {
     const cursorX = x(selectedIndex);
-    context.strokeStyle = "rgba(23, 37, 42, .42)";
+    context.strokeStyle = colours.gridStrong;
     context.lineWidth = 1;
     context.setLineDash([4, 4]);
     context.beginPath();
@@ -443,8 +446,8 @@ function drawLinkedChart(canvas, records, valueFor, options = {}, selectedIndex 
   if (activePoint) {
     const activeX = x(activePoint.index);
     const activeY = y(activePoint.value);
-    context.fillStyle = "rgba(251, 252, 248, .95)";
-    context.strokeStyle = options.line ?? "#b8d354";
+    context.fillStyle = colours.halo;
+    context.strokeStyle = lineColour;
     context.lineWidth = 3;
     context.beginPath();
     context.arc(activeX, activeY, 6, 0, Math.PI * 2);
@@ -580,34 +583,35 @@ function drawRoute(context, route, color, width, segmentMatches = () => true) {
 }
 
 function drawFocusedRoute(context, route, focus) {
+  const colours = palette();
   const bounds = focusBounds(focus);
   if (!bounds) {
-    drawRoute(context, route, "#d77a61", 3);
+    drawRoute(context, route, colours.route, 3);
     return;
   }
-  drawRoute(context, route, "#7e8d89", 3, (start, end) => {
+  const inFocus = (start, end) => {
     const midpoint = (start.index + end.index) / 2;
     return midpoint >= bounds.startIndex && midpoint <= bounds.endIndex;
-  });
-  drawRoute(context, route, "#d77a61", 3, (start, end) => (start.index + end.index) / 2 < bounds.startIndex);
-  drawRoute(context, route, "#6c9296", 3, (start, end) => (start.index + end.index) / 2 > bounds.endIndex);
-  drawRoute(context, route, "#b8d354", 5, (start, end) => {
-    const midpoint = (start.index + end.index) / 2;
-    return midpoint >= bounds.startIndex && midpoint <= bounds.endIndex;
-  });
+  };
+  drawRoute(context, route, colours.route, 3, (start, end) => (start.index + end.index) / 2 < bounds.startIndex);
+  drawRoute(context, route, colours.trackIdle, 3, (start, end) => (start.index + end.index) / 2 > bounds.endIndex);
+  // The stretch in focus: a dark casing with the highlight colour on top, so it reads on water and on land.
+  drawRoute(context, route, colours.ink, 8, inFocus);
+  drawRoute(context, route, colours.highlight, 4, inFocus);
 }
 
 function drawFocusMarker(context, route, focus) {
   if (!focus || typeof focus.centerIndex !== "number" || !route.length) return;
+  const colours = palette();
   const marker = route.reduce((nearest, point) => Math.abs(point.index - focus.centerIndex) < Math.abs(nearest.index - focus.centerIndex) ? point : nearest, route[0]);
-  context.fillStyle = "rgba(251, 252, 248, .95)";
-  context.strokeStyle = "#17252a";
+  context.fillStyle = colours.halo;
+  context.strokeStyle = colours.ink;
   context.lineWidth = 3;
   context.beginPath();
   context.arc(marker.x, marker.y, 9, 0, Math.PI * 2);
   context.fill();
   context.stroke();
-  context.fillStyle = "#b8d354";
+  context.fillStyle = colours.highlight;
   context.beginPath();
   context.arc(marker.x, marker.y, 5, 0, Math.PI * 2);
   context.fill();
@@ -629,7 +633,8 @@ function drawMap(canvas, records, options = {}) {
   context.setTransform(ratio, 0, 0, ratio, 0, 0);
   context.clearRect(0, 0, width, height);
   updateWindDirectionIndicator(options.windIndicator, options.recordWind, options.selectedIndex);
-  const tileContainer = options.tileContainer ?? mapTiles;
+  const { tileContainer } = options;
+  const colours = palette();
   const points = records.map((record, index) => {
     const position = recordPosition(record);
     return position ? { ...position, index } : null;
@@ -656,19 +661,11 @@ function drawMap(canvas, records, options = {}) {
   const project = (point) => ({ x: point.x - map.viewportLeft, y: point.y - map.viewportTop, index: point.index });
   const projectedRoute = route.map(project);
 
-  drawRoute(context, projectedRoute, "rgba(255, 255, 255, .9)", 6);
+  drawRoute(context, projectedRoute, fade(colours.halo, 0.9), 6);
   drawFocusedRoute(context, projectedRoute, options.focus);
 
-  const start = projectedRoute[0];
-  const finish = projectedRoute.at(-1);
-  context.fillStyle = "#17252a";
-  context.beginPath();
-  context.arc(start.x, start.y, 5, 0, Math.PI * 2);
-  context.fill();
-  context.fillStyle = "#b8d354";
-  context.beginPath();
-  context.arc(finish.x, finish.y, 5, 0, Math.PI * 2);
-  context.fill();
+  drawDot(context, projectedRoute[0], 5, colours.ink);
+  drawDot(context, projectedRoute.at(-1), 4, colours.highlight, colours.ink);
 
   drawFocusMarker(context, projectedRoute, options.focus);
 
@@ -677,14 +674,14 @@ function drawMap(canvas, records, options = {}) {
     ? null
     : hitPoints.reduce((nearest, point) => Math.abs(point.index - options.selectedIndex) < Math.abs(nearest.index - options.selectedIndex) ? point : nearest, hitPoints[0]);
   if (activePoint) {
-    context.fillStyle = "rgba(251, 252, 248, .95)";
-    context.strokeStyle = "#17252a";
+    context.fillStyle = colours.halo;
+    context.strokeStyle = colours.ink;
     context.lineWidth = 3;
     context.beginPath();
     context.arc(activePoint.x, activePoint.y, 8, 0, Math.PI * 2);
     context.fill();
     context.stroke();
-    context.fillStyle = "#d77a61";
+    context.fillStyle = colours.route;
     context.beginPath();
     context.arc(activePoint.x, activePoint.y, 4, 0, Math.PI * 2);
     context.fill();
@@ -707,8 +704,7 @@ function drawMap(canvas, records, options = {}) {
 function mapContainerForTarget(target) {
   if (target === "analysis") return analysisMapTiles;
   if (target === "track-water") return trackWaterMapTiles;
-  if (target === "coaching") return coachingMapTiles;
-  return mapTiles;
+  return coachingMapTiles;
 }
 
 function changeMapZoom(target, delta) {
@@ -877,24 +873,24 @@ function renderWindPanels(summary) {
   setText("#analysisWindCoverage", coverageText);
   setText("#analysisWindMessage", message);
   setText("#detailWindSpeed", conditions ? formatWindSpeed(conditions.windSpeed) : "not recorded");
+  // The chip in the session strip: how hard it blew and from where, with an arrow pointing the way the wind goes.
+  const windChip = $("#sessionWind");
+  const hasWind = Boolean(conditions) && Number.isFinite(conditions.windSpeed) && Number.isFinite(conditions.windDirection);
+  windChip.classList.toggle("hidden", !hasWind);
+  if (hasWind) {
+    const from = ((conditions.windDirection % 360) + 360) % 360;
+    setText("#sessionWindText", `${formatWindSpeed(conditions.windSpeed)} ${compassDirection(from)}`);
+    $("#sessionWindArrow").style.setProperty("--wind-angle", `${from + 180}deg`);
+  }
   renderWindCoaching(summary);
 }
 
-function renderCharts(summary) {
-  const speedValues = summary.records.map((record, index) => recordSpeed(record, summary.records[index - 1]));
+function renderBody(summary) {
   const heartValues = summary.records.map((record) => getField(record, "heart_rate"));
-  const speedVisible = drawChart(speedCanvas, speedValues, { min: 0, line: "#b8d354", fillTop: "rgba(184, 211, 84, .30)", axisLabel: (value) => number(value * 3.6, 0) });
-  const heartVisible = drawChart(heartCanvas, heartValues, { line: "#d77a61", fillTop: "rgba(215, 122, 97, .27)", fillBottom: "rgba(215, 122, 97, .02)", axisLabel: (value) => number(value, 0) });
-  const map = drawMap(mapCanvas, summary.records, { recordWind: summary.wind?.recordWind, windIndicator: mapWindIndicator });
-  $("#speedEmpty").classList.toggle("hidden", speedVisible);
+  const heartVisible = drawChart(heartCanvas, heartValues, { line: palette().heart, axisLabel: (value) => number(value, 0) });
   $("#heartEmpty").classList.toggle("hidden", heartVisible);
-  $("#mapEmpty").classList.toggle("hidden", map.visible);
-  setText("#speedStart", summary.records.length ? formatDuration(0) : "start");
-  setText("#speedEnd", summary.duration ? formatDuration(summary.duration) : "finish");
   setText("#heartMin", summary.minHeartRate === null ? "min —" : `min ${number(summary.minHeartRate)} bpm`);
   setText("#heartMax", summary.maxHeartRate === null ? "max —" : `max ${number(summary.maxHeartRate)} bpm`);
-  setText("#mapAccuracy", summary.gpsAccuracy === null ? "" : `avg GPS ±${number(summary.gpsAccuracy, 1)} m`);
-  setText("#mapPointCount", `${number(map.count)} points`);
 }
 
 function valueAtNearestPoint(renderState, targetIndex) {
@@ -926,23 +922,19 @@ function renderAnalysisReadout(summary) {
 
 function renderAnalysis(summary) {
   const records = summary.records;
+  const colours = palette();
   const speed = drawLinkedChart(analysisSpeedCanvas, records, (record, index) => recordSpeed(record, records[index - 1]), {
     min: 0,
-    line: "#b8d354",
-    fillTop: "rgba(184, 211, 84, .30)",
+    line: colours.speed,
     axisLabel: (value) => number(value * 3.6, 0),
   }, analysisSelectionIndex);
   const heart = drawLinkedChart(analysisHeartCanvas, records, (record) => getField(record, "heart_rate"), {
-    line: "#d77a61",
-    fillTop: "rgba(215, 122, 97, .27)",
-    fillBottom: "rgba(215, 122, 97, .02)",
+    line: colours.heart,
     axisLabel: (value) => number(value, 0),
   }, analysisSelectionIndex);
   const wind = drawLinkedChart(analysisWindCanvas, records, (_, index) => summary.wind?.recordWind?.[index]?.windDirection, {
     minHeight: 0,
-    line: "#17252a",
-    fillTop: "rgba(23, 37, 42, .18)",
-    fillBottom: "rgba(23, 37, 42, .02)",
+    line: colours.wind,
     axisLabel: (value) => `${number(value, 0)} deg`,
   }, analysisSelectionIndex);
   const map = drawMap(analysisMapCanvas, records, {
@@ -963,8 +955,6 @@ function renderAnalysis(summary) {
   setText("#analysisHeartMax", summary.maxHeartRate === null ? "max —" : `max ${number(summary.maxHeartRate)} bpm`);
   setText("#analysisMapAccuracy", summary.gpsAccuracy === null ? "" : `avg GPS ±${number(summary.gpsAccuracy, 1)} m`);
   setText("#analysisMapPointCount", `${number(map.count)} points`);
-  setText("#analysisActivityTitle", sessionTitle(summary));
-  setText("#analysisActivityDate", formatDate(summary.starts));
   renderAnalysisReadout(summary);
 }
 
@@ -1042,10 +1032,33 @@ function bindAnalysisInteractions() {
   analysisMapCanvas.addEventListener("pointerleave", clearAnalysisSelection);
 }
 
-const COACHING_SIDE_COLORS = ["#2a78d6", "#eb6834"];
-const COACHING_NEUTRAL_COLOR = "#898781";
-const COACHING_STOPPED_COLOR = "#d03b3b";
 const COACHING_MAP_CONTEXT_SECONDS = 25;
+const TAKEAWAY_DOT_LIMIT = 40;
+
+// The colour of a riding direction: one of the two sides, or neutral for a leg that fits neither.
+function sideColour(sideKey) {
+  const colours = palette();
+  return colours.sides[sideKey] ?? colours.sideNone;
+}
+
+// Explanations live behind a small "?" next to a heading instead of in a paragraph under it.
+function setTip(selector, text) {
+  const tip = $(selector);
+  tip.dataset.tooltip = text ?? "";
+  tip.classList.toggle("hidden", !text);
+}
+
+function setCopy(selector, text) {
+  const copy = $(selector);
+  copy.textContent = text ?? "";
+  copy.classList.toggle("hidden", !text);
+}
+
+// Ride sections are numbered in the order they were ridden; the breaks between them are not counted.
+function sectionName(sectionId) {
+  const position = currentActivity?.segmentation.activeSections.findIndex((section) => section.id === sectionId) ?? -1;
+  return position >= 0 ? `Section ${number(position + 1)}` : "Section";
+}
 const COACHING_TONE_LABELS = { focus: "Work on", strength: "Going well", note: "Worth knowing" };
 
 function coachingFor(summary) {
@@ -1093,10 +1106,92 @@ function sideLabel(coaching, sideKey) {
   return coaching.sides[sideKey]?.label ?? "another direction";
 }
 
+// A small picture for a takeaway, drawn from the numbers its text quotes. Not every takeaway has one.
+function takeawayVisual(takeaway, coaching) {
+  const box = (content, caption) => {
+    const visual = element("div", "takeaway-visual");
+    visual.append(content, element("p", "takeaway-caption", caption));
+    return visual;
+  };
+  // rows: label, share of the full bar (0 to 1), the number as text, and optionally a colour.
+  const bars = (rows, caption) => {
+    const list = element("div", "mini-bars");
+    rows.forEach((row) => {
+      const line = element("div", "mini-bar");
+      const track = element("span", "mini-bar-track");
+      const fill = element("i", "mini-bar-fill");
+      fill.style.width = `${clamp(row.share, 0, 1) * 100}%`;
+      if (row.colour) fill.style.setProperty("--bar", row.colour);
+      track.append(fill);
+      line.append(element("span", "", row.label), track, element("b", "", row.text));
+      list.append(line);
+    });
+    return box(list, caption);
+  };
+  const sides = coaching.sideBalance;
+  const sideRows = (pick, text, full = 1) => sides.map((side) => ({
+    label: side.label,
+    share: pick(side) / full,
+    text: text(pick(side)),
+    colour: side.key === 0 ? "var(--side-a)" : "var(--side-b)",
+  }));
+  const finite = (value) => typeof value === "number" && Number.isFinite(value);
+  const stops = coaching.stopSummary;
+
+  switch (takeaway.group) {
+    case "side-turns":
+    case "side-turn-stops":
+      if (sides.length !== 2 || sides.some((side) => !side.turns.attempted)) return null;
+      return bars(sideRows((side) => side.turns.stopped / side.turns.attempted, formatShare), "turns that ended in a stop");
+    case "side-turn-speed":
+      if (sides.length !== 2 || sides.some((side) => !finite(side.turns.medianSpeedKept))) return null;
+      return bars(sideRows((side) => side.turns.medianSpeedKept, formatShare), "speed kept through the turn");
+    case "side-speed": {
+      if (sides.length !== 2 || sides.some((side) => !finite(side.averageSpeed))) return null;
+      const fastest = Math.max(...sides.map((side) => side.averageSpeed));
+      return bars(sideRows((side) => side.averageSpeed, (speed) => number(speed * 3.6, 1), fastest), "average riding speed, km/h");
+    }
+    case "stop-place": {
+      if (!stops.stopCount || stops.stopCount > TAKEAWAY_DOT_LIMIT) return null;
+      const inTurns = stops.stopsInTurns >= stops.stopsMidLeg;
+      const marked = inTurns ? stops.stopsInTurns : stops.stopsMidLeg;
+      const dots = element("div", "mini-dots");
+      for (let index = 0; index < stops.stopCount; index += 1) dots.append(element("i", index < marked ? "is-on" : ""));
+      return box(dots, `${number(marked)} of ${number(stops.stopCount)} stops ${inTurns ? "in a turn" : "mid-leg"}`);
+    }
+    case "pace": {
+      const quarters = coaching.fatigue?.quarters ?? [];
+      if (quarters.length < 2 || quarters.some((quarter) => !finite(quarter.medianSpeed))) return null;
+      const fastest = Math.max(...quarters.map((quarter) => quarter.medianSpeed));
+      const columns = element("div", "mini-columns");
+      quarters.forEach((quarter, index) => {
+        const column = element("i", index === quarters.length - 1 ? "is-last" : "");
+        column.style.height = `${(quarter.medianSpeed / fastest) * 100}%`;
+        columns.append(column);
+      });
+      return box(columns, `riding speed by quarter: ${quarters.map((quarter) => number(quarter.medianSpeed * 3.6, 1)).join(" · ")} km/h`);
+    }
+    case "board-time":
+      if (!finite(stops.boardShareOfWater)) return null;
+      return bars([
+        { label: "ride", share: stops.boardShareOfWater, text: formatShare(stops.boardShareOfWater), colour: "var(--chart-speed)" },
+        { label: "stop", share: 1 - stops.boardShareOfWater, text: formatShare(1 - stops.boardShareOfWater), colour: "var(--stopped)" },
+      ], "share of your time on the water");
+    case "turn-success":
+      if (!finite(coaching.turnSummary.successRate)) return null;
+      return bars([{ label: "made", share: coaching.turnSummary.successRate, text: formatShare(coaching.turnSummary.successRate), colour: "var(--chart-speed)" }], "turns ridden through without a stop");
+    default:
+      return null;
+  }
+}
+
 function renderCoachingTakeaways(coaching) {
   const cards = coaching.takeaways.map((takeaway) => {
     const card = element("article", `coaching-takeaway is-${takeaway.tone}`);
-    card.append(element("span", "coaching-takeaway-tone", COACHING_TONE_LABELS[takeaway.tone]), element("strong", "", takeaway.title), element("p", "", takeaway.text));
+    const visual = takeawayVisual(takeaway, coaching);
+    card.append(element("span", "coaching-takeaway-tone", COACHING_TONE_LABELS[takeaway.tone]), element("strong", "", takeaway.title));
+    if (visual) card.append(visual);
+    card.append(element("p", "", takeaway.text));
     return card;
   });
   $("#coachingTakeaways").replaceChildren(...(cards.length ? cards : [element("p", "coaching-takeaway-empty", "Not enough turns or riding time in this session to draw conclusions.")]));
@@ -1121,7 +1216,8 @@ function drawTurnChart(coaching) {
   const y = (share) => plotBottom - share * (plotBottom - padding.top);
 
   // Time not spent riding: before the first ride, long breaks, and after the last ride.
-  context.fillStyle = "rgba(23, 37, 42, .06)";
+  const colours = palette();
+  context.fillStyle = colours.band;
   const idle = [
     [coaching.sessionStart, coaching.waterStart],
     ...coaching.stops.filter((stop) => stop.kind === "break").map((stop) => [stop.startTimestamp, stop.endTimestamp]),
@@ -1129,10 +1225,10 @@ function drawTurnChart(coaching) {
   ];
   idle.forEach(([from, to]) => context.fillRect(x(from), padding.top, Math.max(0, x(to) - x(from)), stopLane + 9 - padding.top));
 
-  context.strokeStyle = "rgba(55, 77, 80, 0.16)";
+  context.strokeStyle = colours.grid;
   context.lineWidth = 1;
-  context.fillStyle = "#9ba5a3";
-  context.font = "9px ui-monospace, SFMono-Regular, Menlo, monospace";
+  context.fillStyle = colours.label;
+  context.font = chartFont(10);
   context.textAlign = "right";
   context.textBaseline = "middle";
   [0, 0.25, 0.5, 0.75, 1].forEach((share) => {
@@ -1155,13 +1251,13 @@ function drawTurnChart(coaching) {
   const marks = coaching.turns.map((turn) => ({ turn, x: x(turn.timestamp), y: turn.outcome === "made" ? y(turn.speedKept) : stopLane }));
   const drawMark = (mark, hovered) => {
     if (mark.turn.outcome === "made") {
-      context.fillStyle = "#fbfcf8";
+      context.fillStyle = colours.halo;
       context.beginPath();
-      context.arc(mark.x, mark.y, 6, 0, Math.PI * 2);
+      context.arc(mark.x, mark.y, 6.5, 0, Math.PI * 2);
       context.fill();
-      context.fillStyle = COACHING_SIDE_COLORS[mark.turn.toSide] ?? COACHING_NEUTRAL_COLOR;
+      context.fillStyle = sideColour(mark.turn.toSide);
       context.beginPath();
-      context.arc(mark.x, mark.y, 4, 0, Math.PI * 2);
+      context.arc(mark.x, mark.y, 4.5, 0, Math.PI * 2);
       context.fill();
     } else {
       const cross = (color, lineWidth, size) => {
@@ -1175,11 +1271,11 @@ function drawTurnChart(coaching) {
         context.lineTo(mark.x - size, mark.y + size);
         context.stroke();
       };
-      cross("#fbfcf8", 5.5, 4.5);
-      cross(COACHING_STOPPED_COLOR, 2, 4);
+      cross(colours.halo, 5.5, 4.5);
+      cross(colours.stopped, 2, 4);
     }
     if (hovered) {
-      context.strokeStyle = "#17252a";
+      context.strokeStyle = colours.ink;
       context.lineWidth = 1.5;
       context.beginPath();
       context.arc(mark.x, mark.y, 9, 0, Math.PI * 2);
@@ -1242,13 +1338,14 @@ function drawCoachingMap(coaching) {
   };
   const projected = points.map(project);
 
-  strokeTrack(context, points, projected, () => true, "rgba(255, 255, 255, .9)", 5);
-  strokeTrack(context, points, projected, () => true, "#879793", 1.75);
+  const colours = palette();
+  strokeTrack(context, points, projected, () => true, fade(colours.halo, 0.9), 5);
+  strokeTrack(context, points, projected, () => true, colours.trackIdle, 1.75);
 
   const hovered = coachingRenderState.hoveredTurn;
   const marks = coaching.turns.filter((turn) => turn.position).map((turn) => ({ turn, ...project(turn.position) }));
   const drawMark = (mark) => {
-    if (mark.turn.outcome === "made") drawDot(context, mark, 4, COACHING_SIDE_COLORS[mark.turn.toSide] ?? COACHING_NEUTRAL_COLOR);
+    if (mark.turn.outcome === "made") drawDot(context, mark, 4.5, sideColour(mark.turn.toSide));
     else drawCross(context, mark.x, mark.y, false);
   };
   marks.forEach(drawMark);
@@ -1256,14 +1353,14 @@ function drawCoachingMap(coaching) {
   if (hovered) {
     const from = hovered.timestamp - COACHING_MAP_CONTEXT_SECONDS;
     const to = hovered.timestamp + (hovered.restartSeconds ?? 0) + COACHING_MAP_CONTEXT_SECONDS;
-    strokeTrack(context, points, projected, (point) => point.timestamp >= from && point.timestamp <= to, "#fbfcf8", 7);
-    strokeTrack(context, points, projected, (point) => point.timestamp >= from && point.timestamp <= to, "#17252a", 3.5);
+    strokeTrack(context, points, projected, (point) => point.timestamp >= from && point.timestamp <= to, colours.halo, 7);
+    strokeTrack(context, points, projected, (point) => point.timestamp >= from && point.timestamp <= to, colours.ink, 3.5);
   }
 
   const hoveredMark = marks.find((mark) => mark.turn === hovered);
   if (hoveredMark) {
     drawMark(hoveredMark);
-    context.strokeStyle = "#17252a";
+    context.strokeStyle = colours.ink;
     context.lineWidth = 1.5;
     context.beginPath();
     context.arc(hoveredMark.x, hoveredMark.y, 10, 0, Math.PI * 2);
@@ -1318,7 +1415,7 @@ function showTurnTooltip(mark) {
 
 function renderCoachingTurns(coaching) {
   const summary = coaching.turnSummary;
-  setText("#coachingTurnCopy", `A turn is the change of direction between two legs. Speed kept compares the slowest moment of the turn with your speed going into it, and a turn that ends in a stop counts as not made. ${number(summary.attempted)} ${summary.attempted === 1 ? "turn was" : "turns were"} found.`);
+  setTip("#coachingTurnTip", "A turn is the change of direction between two legs. Speed kept compares the slowest moment of the turn with your speed going into it. A turn that ends in a stop counts as not made.");
   $("#coachingTurnStats").replaceChildren(
     statTile("Turns made", summary.attempted ? `${number(summary.made)} of ${number(summary.attempted)}` : "—", `${number(summary.stopped)} ended in a stop`),
     statTile("Success rate", formatShare(summary.successRate), "ridden through without stopping"),
@@ -1344,7 +1441,7 @@ function renderCoachingTurns(coaching) {
   drawTurnChart(coaching);
   drawCoachingMap(coaching);
   const placed = coaching.turns.filter((turn) => turn.position).length;
-  setText("#coachingMapNote", `Hover a turn in the chart or on the map to find it in the other. The dark line is the ${number(COACHING_MAP_CONTEXT_SECONDS)} seconds before and after it.${placed < coaching.turns.length ? ` ${number(coaching.turns.length - placed)} of ${number(coaching.turns.length)} turns have no GPS fix nearby and are missing from the map.` : ""}`);
+  setText("#coachingMapNote", `Hover a turn in the chart or on the map to find it in the other.${placed < coaching.turns.length ? ` ${number(coaching.turns.length - placed)} of ${number(coaching.turns.length)} turns have no GPS fix nearby and are missing from the map.` : ""}`);
 
   const cell = (text, className = "") => element("td", className, text);
   $("#coachingTurnTableBody").replaceChildren(...coaching.turns.map((turn) => {
@@ -1412,7 +1509,7 @@ function renderCoachingSides(coaching) {
 function renderCoachingStops(coaching, summary) {
   const stops = coaching.stopSummary;
   const options = summary.segmentation.options;
-  setText("#coachingStopCopy", `A stop is any stretch out on the water where you stayed below ${formatSpeed(options.lowMovementSpeedMps)} for at least ${number(coaching.options.minimumStopSeconds)} seconds. Getting up for less than ${number(coaching.options.minimumRideSeconds)} seconds and going down again counts as a failed restart of the same stop. Stops longer than ${number(coaching.options.breakSeconds / 60)} minutes count as breaks.`);
+  setTip("#coachingStopTip", `A stop is any stretch out on the water where you stayed below ${formatSpeed(options.lowMovementSpeedMps)} for at least ${number(coaching.options.minimumStopSeconds)} seconds. Getting up for less than ${number(coaching.options.minimumRideSeconds)} seconds and going down again counts as a failed restart of the same stop. Stops longer than ${number(coaching.options.breakSeconds / 60)} minutes count as breaks.`);
   const where = [`${number(stops.stopsInTurns)} in a turn`, `${number(stops.stopsMidLeg)} mid-leg`];
   if (stops.stopsUnclear) where.push(`${number(stops.stopsUnclear)} unclear`);
   $("#coachingStopStats").replaceChildren(
@@ -1432,13 +1529,15 @@ function renderCoachingUpwind(coaching, wind) {
   stats.classList.toggle("hidden", !upwind);
   $("#coachingUpwindSections").classList.toggle("hidden", !upwind);
   if (!upwind) {
-    setText("#coachingUpwindCopy", wind?.status === "loading"
+    setCopy("#coachingUpwindCopy", wind?.status === "loading"
       ? "Upwind figures need a wind direction. Wind data is still loading."
       : "Upwind figures need a wind direction, and none is available for this session.");
+    setTip("#coachingUpwindTip", "");
     stats.replaceChildren();
     return;
   }
-  setText("#coachingUpwindCopy", "Each leg's course is compared with the wind direction at that moment: 0 degrees is straight into the wind and 90 degrees is straight across it. These figures are only as accurate as the wind direction, and modelled hourly wind is approximate.");
+  setCopy("#coachingUpwindCopy", "");
+  setTip("#coachingUpwindTip", "Each leg's course is compared with the wind direction at that moment: 0 degrees is straight into the wind and 90 degrees is straight across it. These figures are only as accurate as the wind direction, and modelled hourly wind is approximate.");
   const net = upwind.netMetres;
   stats.replaceChildren(
     statTile("Closest to the wind", upwind.closest ? `${number(upwind.closest.angleToWind, 0)} deg` : "—", upwind.closest ? `${formatSpeed(upwind.closest.boardSpeed)} over ${formatSeconds(upwind.closest.seconds)}` : "no upwind leg found"),
@@ -1448,7 +1547,7 @@ function renderCoachingUpwind(coaching, wind) {
   );
   $("#coachingUpwindSectionBody").replaceChildren(...upwind.sections.map((section) => {
     const row = element("tr");
-    const name = element("td", "", section.label);
+    const name = element("td", "", sectionName(section.id));
     name.append(element("small", "", `${formatTime(section.startTimestamp)} – ${formatTime(section.endTimestamp)}`));
     row.append(
       name,
@@ -1463,17 +1562,18 @@ function renderCoachingFatigue(coaching) {
   const fatigue = coaching.fatigue;
   $("#coachingFatigueTable").classList.toggle("hidden", !fatigue);
   if (!fatigue) {
-    setText("#coachingFatigueCopy", `Comparing the start of a session with its end needs at least ${number(coaching.options.minimumRidingSecondsForFatigue / 60)} minutes of riding.`);
+    setText("#coachingFatigueCopy", `Needs at least ${number(coaching.options.minimumRidingSecondsForFatigue / 60)} minutes of riding.`);
     $("#coachingFatigueBody").replaceChildren();
     return;
   }
+  const signed = (value) => `${value >= 0 ? "+" : "−"}${number(Math.abs(value), 0)}`;
   const sentences = [fatigue.drop
-    ? `Riding speed dropped by ${formatShare(fatigue.drop.speedDrop)} from ${formatTime(fatigue.drop.timestamp)} and did not come back. That can be fatigue or dropping wind.`
-    : `No lasting drop in riding speed${fatigue.speedChange === null ? "." : `: the last quarter was ${fatigue.speedChange >= 0 ? "+" : "−"}${formatShare(Math.abs(fatigue.speedChange))} against the first.`}`];
-  if (fatigue.heartRateDrift !== null) sentences.push(`Heart rate while riding ${fatigue.heartRateDrift >= 0 ? "rose" : "fell"} ${number(Math.abs(fatigue.heartRateDrift), 0)} bpm from the first quarter to the last.`);
+    ? `Speed dropped ${formatShare(fatigue.drop.speedDrop)} from ${formatTime(fatigue.drop.timestamp)} and stayed down: fatigue or dropping wind.`
+    : `No lasting drop in speed${fatigue.speedChange === null ? "." : `: last quarter ${fatigue.speedChange >= 0 ? "+" : "−"}${formatShare(Math.abs(fatigue.speedChange))} against the first.`}`];
+  if (fatigue.heartRateDrift !== null) sentences.push(`Heart rate ${signed(fatigue.heartRateDrift)} bpm from first to last quarter.`);
   if (fatigue.heartRateRecovery) {
     const recovery = fatigue.heartRateRecovery;
-    sentences.push(`In the first ${number(recovery.seconds)} seconds of a longer stop it ${recovery.beatsPerMinute >= 0 ? "fell" : "rose"} by a median of ${number(Math.abs(recovery.beatsPerMinute), 0)} bpm (${number(recovery.stopCount)} ${recovery.stopCount === 1 ? "stop" : "stops"}).`);
+    sentences.push(`It ${recovery.beatsPerMinute >= 0 ? "fell" : "rose"} ${number(Math.abs(recovery.beatsPerMinute), 0)} bpm in the first ${number(recovery.seconds)} seconds of a longer stop.`);
   }
   setText("#coachingFatigueCopy", sentences.join(" "));
   $("#coachingFatigueBody").replaceChildren(...fatigue.quarters.map((quarter) => {
@@ -1505,8 +1605,6 @@ function renderCoachingBests(coaching) {
 
 function renderCoaching(summary) {
   const coaching = coachingFor(summary);
-  setText("#coachingActivityTitle", sessionTitle(summary));
-  setText("#coachingActivityDate", formatDate(summary.starts));
   $("#coachingUnavailable").classList.toggle("hidden", coaching.available);
   $("#coachingSections").classList.toggle("hidden", !coaching.available);
   if (!coaching.available) return;
@@ -1542,11 +1640,6 @@ function bindCoachingInteractions() {
   coachingMapCanvas.addEventListener("pointerleave", () => setHoveredTurn(null));
 }
 
-const TRACK_WATER_RIDING_COLOR = "#2a78d6";
-const TRACK_WATER_IDLE_COLOR = "#9aa5a2";
-const TRACK_WATER_STOP_COLOR = "#d03b3b";
-// One hue from light (slow) to dark (fast), chosen to stand out against the blue of the water tiles.
-const TRACK_WATER_SPEED_COLORS = ["#fde2a6", "#f8b84e", "#ec8a2a", "#c35a17", "#7f340b"];
 const TRACK_WATER_CONTEXT_LABELS = { turn: "In a turn", leg: "Mid-leg", unclear: "Unclear" };
 
 function trackWaterFor(summary) {
@@ -1601,7 +1694,7 @@ function strokeTrack(context, points, projected, matches, color, width) {
   context.stroke();
 }
 
-function drawDot(context, point, radius, fill, ring = "#fbfcf8") {
+function drawDot(context, point, radius, fill, ring = palette().halo) {
   context.fillStyle = ring;
   context.beginPath();
   context.arc(point.x, point.y, radius + 2, 0, Math.PI * 2);
@@ -1624,10 +1717,11 @@ function drawCross(context, x, y, hovered) {
     context.lineTo(x - size, y + size);
     context.stroke();
   };
-  stroke("#fbfcf8", 6.5, 5.5);
-  stroke(TRACK_WATER_STOP_COLOR, 2.5, 5);
+  const colours = palette();
+  stroke(colours.halo, 6.5, 5.5);
+  stroke(colours.stopped, 2.5, 5);
   if (hovered) {
-    context.strokeStyle = "#17252a";
+    context.strokeStyle = colours.ink;
     context.lineWidth = 1.5;
     context.beginPath();
     context.arc(x, y, 11, 0, Math.PI * 2);
@@ -1636,8 +1730,9 @@ function drawCross(context, x, y, hovered) {
 }
 
 function drawHoverMarker(context, point) {
-  context.fillStyle = "rgba(251, 252, 248, .95)";
-  context.strokeStyle = "#17252a";
+  const colours = palette();
+  context.fillStyle = colours.halo;
+  context.strokeStyle = colours.ink;
   context.lineWidth = 2;
   context.beginPath();
   context.arc(point.x, point.y, 6, 0, Math.PI * 2);
@@ -1666,7 +1761,7 @@ function drawWindUpPlot(analysis) {
 
   // The level of the launch: above it is ground gained, below it is ground lost.
   const launchPoint = project(analysis.launch);
-  context.strokeStyle = "rgba(55, 77, 80, 0.3)";
+  context.strokeStyle = palette().gridStrong;
   context.lineWidth = 1;
   context.setLineDash([4, 4]);
   context.beginPath();
@@ -1674,23 +1769,23 @@ function drawWindUpPlot(analysis) {
   context.lineTo(width - padding.right, launchPoint.y);
   context.stroke();
   context.setLineDash([]);
-  context.fillStyle = "#9ba5a3";
-  context.font = "9px ui-monospace, SFMono-Regular, Menlo, monospace";
+  context.fillStyle = palette().label;
+  context.font = chartFont(10);
   context.textBaseline = "bottom";
   context.textAlign = launchPoint.x > width / 2 ? "left" : "right";
   context.fillText("launch level", launchPoint.x > width / 2 ? padding.left : width - padding.right, launchPoint.y - 3);
 
-  strokeTrack(context, points, projected, (point) => !point.riding, TRACK_WATER_IDLE_COLOR, 1.5);
-  strokeTrack(context, points, projected, (point) => point.riding, TRACK_WATER_RIDING_COLOR, 1.75);
-  drawDot(context, launchPoint, 5.5, "#17252a");
-  drawDot(context, project(analysis.landing), 3, "#b8d354", "#17252a");
+  strokeTrack(context, points, projected, (point) => !point.riding, palette().trackIdle, 1.5);
+  strokeTrack(context, points, projected, (point) => point.riding, palette().line, 1.75);
+  drawDot(context, launchPoint, 5.5, palette().ink);
+  drawDot(context, project(analysis.landing), 3, palette().highlight, palette().ink);
 
   // Wind arrow, pointing the way the wind blows.
-  context.fillStyle = "#17252a";
-  context.strokeStyle = "#17252a";
+  context.fillStyle = palette().ink;
+  context.strokeStyle = palette().ink;
   context.textAlign = "center";
   context.textBaseline = "top";
-  context.font = "700 9px ui-monospace, SFMono-Regular, Menlo, monospace";
+  context.font = chartFont(10, 700);
   context.fillText("WIND", width / 2, 6);
   context.lineWidth = 2;
   context.beginPath();
@@ -1714,10 +1809,10 @@ function drawWindUpPlot(analysis) {
   context.lineTo(padding.left + barMetres * scale, barY);
   context.lineTo(padding.left + barMetres * scale, barY - 4);
   context.stroke();
-  context.font = "9px ui-monospace, SFMono-Regular, Menlo, monospace";
+  context.font = chartFont(10);
   context.textAlign = "left";
   context.textBaseline = "bottom";
-  context.fillStyle = "#6f7d7e";
+  context.fillStyle = palette().label;
   context.fillText(formatDistance(barMetres), padding.left + barMetres * scale + 7, barY + 3);
 
   const hovered = trackWaterRenderState.hoveredPoint;
@@ -1739,7 +1834,7 @@ function drawUpwindChart(analysis, coaching) {
   const y = (metres) => plotBottom - ((metres - minimum) / (maximum - minimum)) * (plotBottom - padding.top);
 
   // Time not spent riding: before the first ride, long breaks, and after the last ride.
-  context.fillStyle = "rgba(23, 37, 42, .06)";
+  context.fillStyle = palette().band;
   const idle = [
     [analysis.sessionStart, analysis.waterStart],
     ...coaching.stops.filter((stop) => stop.kind === "break").map((stop) => [stop.startTimestamp, stop.endTimestamp]),
@@ -1748,20 +1843,20 @@ function drawUpwindChart(analysis, coaching) {
   idle.forEach(([from, to]) => context.fillRect(x(from), padding.top, Math.max(0, x(to) - x(from)), plotBottom - padding.top));
 
   context.lineWidth = 1;
-  context.font = "9px ui-monospace, SFMono-Regular, Menlo, monospace";
+  context.font = chartFont(10);
   context.textAlign = "right";
   context.textBaseline = "middle";
   for (let tick = minimum; tick <= maximum + step / 2; tick += step) {
     const level = Math.round(tick);
-    context.strokeStyle = level === 0 ? "rgba(23, 37, 42, 0.45)" : "rgba(55, 77, 80, 0.16)";
-    context.fillStyle = level === 0 ? "#17252a" : "#9ba5a3";
+    context.strokeStyle = level === 0 ? palette().gridStrong : palette().grid;
+    context.fillStyle = level === 0 ? palette().ink : palette().label;
     context.fillText(level === 0 ? "launch" : `${level > 0 ? "+" : "−"}${number(Math.abs(level))} m`, padding.left - 8, y(level));
     context.beginPath();
     context.moveTo(padding.left, y(level));
     context.lineTo(width - padding.right, y(level));
     context.stroke();
   }
-  context.fillStyle = "#9ba5a3";
+  context.fillStyle = palette().label;
   context.textBaseline = "alphabetic";
   const tickStep = [300, 600, 900, 1200, 1800, 3600].find((seconds) => duration / seconds <= 7) ?? 7200;
   for (let elapsed = 0; elapsed <= duration; elapsed += tickStep) {
@@ -1770,13 +1865,13 @@ function drawUpwindChart(analysis, coaching) {
   }
 
   const projected = points.map((point) => ({ x: x(point.timestamp), y: y(point.upwind) }));
-  strokeTrack(context, points, projected, (point) => !point.riding, TRACK_WATER_IDLE_COLOR, 1.5);
-  strokeTrack(context, points, projected, (point) => point.riding, TRACK_WATER_RIDING_COLOR, 2);
+  strokeTrack(context, points, projected, (point) => !point.riding, palette().trackIdle, 1.5);
+  strokeTrack(context, points, projected, (point) => point.riding, palette().line, 2);
 
   const hovered = trackWaterRenderState.hoveredPoint;
   if (hovered) {
     const marker = { x: x(hovered.timestamp), y: y(hovered.upwind) };
-    context.strokeStyle = "rgba(23, 37, 42, 0.35)";
+    context.strokeStyle = palette().gridStrong;
     context.lineWidth = 1;
     context.beginPath();
     context.moveTo(marker.x, padding.top);
@@ -1813,9 +1908,10 @@ function renderTrackWaterUpwind(analysis, summary, coaching) {
     ? `the recording ${launchLanding.startedRiding && launchLanding.endedRiding ? "starts and ends" : launchLanding.startedRiding ? "starts" : "ends"} while riding`
     : null;
   if (!wind) {
-    setText("#trackWaterUpwindCopy", summary.wind?.status === "loading"
+    setCopy("#trackWaterUpwindCopy", summary.wind?.status === "loading"
       ? "Ground gained upwind needs a wind direction. Wind data is still loading."
-      : "Ground gained upwind needs a wind direction, and none is available for this session. The distance between launch and landing does not depend on it.");
+      : "Ground gained upwind needs a wind direction, and none is available for this session.");
+    setTip("#trackWaterUpwindTip", "");
     $("#trackWaterUpwindStats").replaceChildren(
       statTile("Launch to landing", formatDistance(launchLanding.distance), edgeNote ?? "straight line between the two"),
       statTile("Landing against launch", "—", "needs a wind direction"),
@@ -1833,8 +1929,11 @@ function renderTrackWaterUpwind(analysis, summary, coaching) {
       ? `These figures are only as good as the wind direction: if it is ${number(launchLanding.windErrorDegrees)} deg off, the landing figure moves by about ${formatDistance(launchLanding.uncertaintyMetres)}, and positions at the far ends of the run move more.`
       : "These figures are only as good as the wind direction: when it is off, positions at the far ends of the run move the most.",
   ];
-  if (wind.shiftDegrees > analysis.options.windShiftNoteDegrees) sentences.push(`The wind direction shifted by up to ${number(wind.shiftDegrees, 0)} deg during the session, so one direction is a compromise.`);
-  setText("#trackWaterUpwindCopy", sentences.join(" "));
+  setTip("#trackWaterUpwindTip", sentences.join(" "));
+  // A shifting wind is a finding about this session, so it stays in view; the rest is how to read the plots.
+  setCopy("#trackWaterUpwindCopy", wind.shiftDegrees > analysis.options.windShiftNoteDegrees
+    ? `The wind shifted by up to ${number(wind.shiftDegrees, 0)} deg, so one direction is a compromise.`
+    : "");
 
   const offset = launchLanding.upwindMetres;
   const { highest, lowest, sections } = analysis.upwind;
@@ -1843,7 +1942,7 @@ function renderTrackWaterUpwind(analysis, summary, coaching) {
     statTile("Landing against launch", launchLanding.distance < 15 ? "≈ 0 m" : `${formatDistance(Math.abs(offset))} ${offset >= 0 ? "upwind" : "downwind"}`, edgeNote ?? (launchLanding.distance < 15 ? `back at the launch, ${formatDistance(launchLanding.distance)} apart` : `${formatDistance(launchLanding.distance)} apart in a straight line`)),
     statTile("Highest point", formatSignedDistance(highest.metres), `against the launch, at ${formatTime(highest.timestamp)}`),
     statTile("Lowest point", formatSignedDistance(lowest.metres), `against the launch, at ${formatTime(lowest.timestamp)}`),
-    statTile("Most ground gained", best ? formatSignedDistance(best.netMetres) : "—", best ? `in ${best.label.toLowerCase()}` : "no ride section with a track"),
+    statTile("Most ground gained", best ? formatSignedDistance(best.netMetres) : "—", best ? `in ${sectionName(best.id).toLowerCase()}` : "no ride section with a track"),
   );
 
   if (!analysis.points.includes(trackWaterRenderState.hoveredPoint)) {
@@ -1890,23 +1989,23 @@ function drawTrackWaterMap(analysis) {
   const projected = points.map(project);
   const speedMode = trackWaterRenderState.mode === "speed";
 
-  strokeTrack(context, points, projected, () => true, "rgba(255, 255, 255, .9)", speedMode ? 7 : 5.5);
-  strokeTrack(context, points, projected, (point) => !point.riding, "#879793", 2);
+  strokeTrack(context, points, projected, () => true, fade(palette().halo, 0.9), speedMode ? 7 : 5.5);
+  strokeTrack(context, points, projected, (point) => !point.riding, palette().trackIdle, 2);
   const selectedId = trackWaterRenderState.selectedSectionId;
   const selected = (point) => selectedId !== null && point.sectionId === selectedId;
   const dimmed = (point) => selectedId !== null && point.sectionId !== selectedId;
   if (selectedId !== null) {
-    strokeTrack(context, points, projected, (point) => point.riding && dimmed(point), "rgba(135, 151, 147, .5)", 2);
-    strokeTrack(context, points, projected, selected, "rgba(255, 255, 255, .95)", 8);
-    strokeTrack(context, points, projected, selected, "#17252a", 5);
+    strokeTrack(context, points, projected, (point) => point.riding && dimmed(point), fade(palette().trackIdle, 0.55), 2);
+    strokeTrack(context, points, projected, selected, fade(palette().halo, 0.95), 8);
+    strokeTrack(context, points, projected, selected, palette().ink, 5);
   }
   if (speedMode) {
-    TRACK_WATER_SPEED_COLORS.forEach((color, step) => strokeTrack(context, points, projected, (point) => point.riding && point.speedStep === step && !dimmed(point), color, 3));
+    palette().speedSteps.forEach((color, step) => strokeTrack(context, points, projected, (point) => point.riding && point.speedStep === step && !dimmed(point), color, 3));
   } else {
-    strokeTrack(context, points, projected, (point) => point.riding && !dimmed(point), selectedId === null ? "rgba(23, 37, 42, .62)" : "#b8d354", selectedId === null ? 2.25 : 2.5);
+    strokeTrack(context, points, projected, (point) => point.riding && !dimmed(point), selectedId === null ? palette().trackRiding : palette().highlight, selectedId === null ? 2.25 : 2.5);
   }
-  drawDot(context, project(analysis.launch), 6, "#17252a");
-  drawDot(context, project(analysis.landing), 3.5, "#b8d354", "#17252a");
+  drawDot(context, project(analysis.launch), 6, palette().ink);
+  drawDot(context, project(analysis.landing), 3.5, palette().highlight, palette().ink);
 
   const marks = speedMode ? [] : analysis.events.filter((event) => event.placed).map((event) => ({ event, ...project(event.point) }));
   marks.forEach((mark) => drawCross(context, mark.x, mark.y, false));
@@ -1943,7 +2042,6 @@ function trackWaterStopSentence(analysis) {
   } else if (placedEventCount) {
     sentences.push(`${number(placedEventCount)} ${placedEventCount === 1 ? "stop is" : "stops are"} marked on the map.`);
   }
-  sentences.push(`Each stop is drawn at the last GPS fix before it, because the watch loses GPS in the water.`);
   if (unplaced) sentences.push(`${number(unplaced)} ${unplaced === 1 ? "stop" : "stops"} could not be placed: there was no fix within ${number(analysis.options.eventFixSeconds)} seconds.`);
   return sentences.join(" ");
 }
@@ -1956,9 +2054,10 @@ function renderTrackWaterMap(analysis) {
     button.setAttribute("aria-pressed", String(active));
   });
   setText("#trackWaterMapTitle", speedMode ? "Where you were fast" : "Where the stops happened");
-  setText("#trackWaterMapCopy", speedMode
-    ? `Riding stretches are coloured by speed, light for slow and dark for fast, using the ${number(currentActivity.segmentation.options.smoothingSeconds)}-second median. Turns are always light; a light patch in the middle of a leg, or a zone that is dark on every pass, says something about the spot.`
-    : trackWaterStopSentence(analysis));
+  setCopy("#trackWaterMapCopy", speedMode ? "Light is slow, dark is fast." : trackWaterStopSentence(analysis));
+  setTip("#trackWaterMapTip", speedMode
+    ? `Riding stretches are coloured by the ${number(currentActivity.segmentation.options.smoothingSeconds)}-second median speed. Turns are always light; a light patch in the middle of a leg, or a zone that is dark on every pass, says something about the spot.`
+    : "Each stop is drawn at the last GPS fix before it, because the watch loses GPS in the water.");
 
   const entry = (swatch, text) => {
     const item = element("span");
@@ -1969,10 +2068,10 @@ function renderTrackWaterMap(analysis) {
   if (speedMode && analysis.speedScale) {
     const { bounds } = analysis.speedScale;
     const kilometres = (speed) => number(speed * 3.6, 0);
-    TRACK_WATER_SPEED_COLORS.forEach((color, step) => {
+    palette().speedSteps.forEach((color, step) => {
       const swatch = element("i", "track-water-step");
       swatch.style.background = color;
-      const text = step === 0 ? `under ${kilometres(bounds[1])}` : step === TRACK_WATER_SPEED_COLORS.length - 1 ? `over ${kilometres(bounds[step])} km/h` : `${kilometres(bounds[step])}–${kilometres(bounds[step + 1])}`;
+      const text = step === 0 ? `under ${kilometres(bounds[1])}` : step === palette().speedSteps.length - 1 ? `over ${kilometres(bounds[step])} km/h` : `${kilometres(bounds[step])}–${kilometres(bounds[step + 1])}`;
       legend.push(entry(swatch, text));
     });
   } else {
@@ -2011,7 +2110,7 @@ function renderTrackWaterSections(analysis, summary) {
   const rows = sectionRows(segmentation, coachingFor(summary), analysis);
   const { options } = segmentation;
   setText("#trackWaterSectionsCount", `${number(rows.length)} ${rows.length === 1 ? "section" : "sections"}`);
-  setText("#trackWaterSectionsCopy", `A ride section is at least ${number(options.minimumActiveSeconds)} seconds where the ${number(options.smoothingSeconds)}-second median speed stays above ${formatSpeed(options.activeSpeedMps)}, with stops shorter than ${number(options.mergeGapSeconds)} seconds bridged. Longer breaks split one section from the next, and ${number(segmentation.legCount)} ${segmentation.legCount === 1 ? "leg was" : "legs were"} found between turns. A stop is counted for the section it happens in or right after.`);
+  setTip("#trackWaterSectionsTip", `A ride section is at least ${number(options.minimumActiveSeconds)} seconds where the ${number(options.smoothingSeconds)}-second median speed stays above ${formatSpeed(options.activeSpeedMps)}, with stops shorter than ${number(options.mergeGapSeconds)} seconds bridged. Longer breaks split one section from the next. A stop is counted for the section it happens in or right after.`);
   if (!rows.some((row) => row.id === trackWaterRenderState.selectedSectionId)) trackWaterRenderState.selectedSectionId = null;
   $("#trackWaterSectionsBody").replaceChildren(...rows.map((row) => {
     const selected = row.id === trackWaterRenderState.selectedSectionId;
@@ -2019,7 +2118,7 @@ function renderTrackWaterSections(analysis, summary) {
     tableRow.dataset.sectionId = row.id;
     tableRow.tabIndex = 0;
     tableRow.setAttribute("aria-pressed", String(selected));
-    const name = element("td", "", row.label);
+    const name = element("td", "", sectionName(row.id));
     name.append(element("small", "", `${formatTime(row.startTimestamp)} – ${formatTime(row.endTimestamp)}`));
     const heart = element("td", "is-number", row.averageHeartRate === null ? "—" : `${number(row.averageHeartRate, 0)} bpm`);
     if (row.averageHeartRate !== null && row.heartRateTrend !== null) {
@@ -2042,8 +2141,6 @@ function renderTrackWaterSections(analysis, summary) {
 
 function renderTrackWater(summary) {
   const analysis = trackWaterFor(summary);
-  setText("#trackWaterActivityTitle", sessionTitle(summary));
-  setText("#trackWaterActivityDate", formatDate(summary.starts));
   $("#trackWaterUnavailable").classList.toggle("hidden", analysis.available);
   $("#trackWaterSections").classList.toggle("hidden", !analysis.available);
   trackWaterRenderState.analysis = analysis.available ? analysis : null;
@@ -2148,7 +2245,6 @@ function bindTrackWaterInteractions() {
   });
 }
 
-const PROGRESS_LINE_COLOR = "#2a78d6";
 const PROGRESS_DIRECTION_WORDS = { better: "Better", worse: "Worse", level: "Level", up: "Up", down: "Down" };
 
 function progressMetric(key) {
@@ -2266,7 +2362,7 @@ function openProgressSession(session) {
   } else {
     loadFile(session.file);
   }
-  window.location.hash = "#overview";
+  window.location.hash = "#coach";
 }
 
 function drawProgressChart(card) {
@@ -2282,9 +2378,9 @@ function drawProgressChart(card) {
   const x = (index) => (sessions.length > 1 ? padding.left + (index / (sessions.length - 1)) * plotWidth : padding.left + plotWidth / 2);
   card.x = x;
 
-  context.font = "9px ui-monospace, SFMono-Regular, Menlo, monospace";
+  context.font = chartFont(10);
   if (!present.length) {
-    context.fillStyle = "#9ba5a3";
+    context.fillStyle = palette().label;
     context.textAlign = "center";
     context.textBaseline = "middle";
     context.fillText(metric.needsWind ? "no wind direction for these rides yet" : "no ride has this measure", width / 2, height / 2);
@@ -2309,8 +2405,8 @@ function drawProgressChart(card) {
   context.textAlign = "right";
   context.textBaseline = "middle";
   for (let tick = Math.ceil(low / step) * step; tick <= high + step * 1e-6; tick += step) {
-    context.strokeStyle = "rgba(55, 77, 80, 0.16)";
-    context.fillStyle = "#9ba5a3";
+    context.strokeStyle = palette().grid;
+    context.fillStyle = palette().label;
     context.fillText(number(tick, step < 1 ? 1 : 0), padding.left - 8, y(tick));
     context.beginPath();
     context.moveTo(padding.left, y(tick));
@@ -2325,13 +2421,13 @@ function drawProgressChart(card) {
   sessions.forEach((session, index) => {
     const labelled = index === hovered || (hovered === null && (index % labelEvery === 0 || index === sessions.length - 1) && !(index !== sessions.length - 1 && sessions.length - 1 - index < labelEvery));
     if (!labelled) return;
-    context.fillStyle = index === hovered ? "#17252a" : "#9ba5a3";
+    context.fillStyle = index === hovered ? palette().ink : palette().label;
     context.textAlign = index === 0 && sessions.length > 1 ? "left" : index === sessions.length - 1 && sessions.length > 1 ? "right" : "center";
     context.fillText(progressDateLabel(session), x(index), height - 8);
   });
 
   if (hovered !== null) {
-    context.strokeStyle = "rgba(23, 37, 42, 0.3)";
+    context.strokeStyle = palette().gridStrong;
     context.beginPath();
     context.moveTo(x(hovered), padding.top - 6);
     context.lineTo(x(hovered), plotBottom);
@@ -2339,7 +2435,7 @@ function drawProgressChart(card) {
   }
 
   // The line only joins rides that follow each other; a ride without the measure leaves a gap.
-  context.strokeStyle = PROGRESS_LINE_COLOR;
+  context.strokeStyle = palette().line;
   context.lineWidth = 2;
   context.lineJoin = "round";
   context.beginPath();
@@ -2350,15 +2446,15 @@ function drawProgressChart(card) {
   });
   context.stroke();
   values.forEach((value, index) => {
-    if (value !== null) drawDot(context, { x: x(index), y: y(value) }, index === hovered ? 5 : 3.5, PROGRESS_LINE_COLOR);
+    if (value !== null) drawDot(context, { x: x(index), y: y(value) }, index === hovered ? 5 : 3.5, palette().line);
   });
 
   // Value labels on the first and last ride that have the measure, or on the hovered ride.
   const firstIndex = values.findIndex((value) => value !== null);
   const lastIndex = values.length - 1 - [...values].reverse().findIndex((value) => value !== null);
   const labelIndexes = hovered !== null ? (values[hovered] !== null ? [hovered] : []) : [...new Set([firstIndex, lastIndex])];
-  context.fillStyle = "#17252a";
-  context.font = "700 10px ui-monospace, SFMono-Regular, Menlo, monospace";
+  context.fillStyle = palette().ink;
+  context.font = chartFont(11, 700);
   context.textBaseline = "alphabetic";
   labelIndexes.forEach((index) => {
     const text = `${number(values[index], kind.digits)}${kind.unit === "%" ? "%" : ""}`;
@@ -2435,6 +2531,8 @@ function renderProgress() {
   const sessions = progressState.sessions;
   $("#progressEmpty").classList.toggle("hidden", sessions.length > 0);
   $("#progressBody").classList.toggle("hidden", sessions.length === 0);
+  setText("#navRideCount", number(sessions.length));
+  $("#navRideCount").classList.toggle("hidden", sessions.length === 0);
   if (!sessions.length) {
     progressState.cards = [];
     return;
@@ -2446,7 +2544,7 @@ function renderProgress() {
   setText("#progressTitle", `${number(sessions.length)} ${sessions.length === 1 ? "ride" : "rides"}${dated.length > 1 ? `, ${progressDateLabel(dated[0], true)} to ${progressDateLabel(dated.at(-1), true)}` : ""}`);
   const sentences = [sessions.length < 2
     ? "Add at least one more ride to see how a measure changes."
-    : "Each chart follows one measure from ride to ride. Rides are in date order and evenly spaced, whatever the time between them. Hover a chart or a table row to read the same ride everywhere."];
+    : "Hover a chart or a table row to read the same ride everywhere."];
   if (idle) sentences.push(`${number(idle)} ${idle === 1 ? "ride has" : "rides have"} no riding in ${idle === 1 ? "it" : "them"} and ${idle === 1 ? "leaves" : "leave"} a gap.`);
   if (progressNeedsWind()) {
     const ready = sessions.filter((session) => session.wind === "ready").length;
@@ -2454,7 +2552,7 @@ function renderProgress() {
     sentences.push(waiting
       ? `Looking up the wind: ${number(ready)} of ${number(sessions.filter((session) => session.available).length)} rides done.`
       : ready
-        ? `Wind direction found for ${number(ready)} of ${number(sessions.filter((session) => session.available).length)} rides. Upwind measures are only as accurate as that direction, and modelled hourly wind is approximate.`
+        ? `Wind direction found for ${number(ready)} of ${number(sessions.filter((session) => session.available).length)} rides; modelled wind is approximate.`
         : "No wind direction could be found for these rides, so the upwind measures stay empty.");
   }
   setText("#progressCopy", sentences.join(" "));
@@ -2605,34 +2703,34 @@ function bindProgressInteractions() {
 }
 
 function activePage() {
-  const page = window.location.hash.slice(1);
-  return ["overview", "speed-effort", "track-water", "coaching", "progress"].includes(page) ? page : "overview";
+  return resolvePage(window.location.hash);
 }
 
 function updatePage() {
   const page = activePage();
-  const overviewActive = page === "overview";
-  const analysisActive = page === "speed-effort";
-  const coachingActive = page === "coaching";
-  const trackWaterActive = page === "track-water";
-  setText("#pageLabel", { overview: "overview", "speed-effort": "session overview", "track-water": "track & water", coaching: "coaching", progress: "progress" }[page]);
+  const hasRide = Boolean(currentActivity);
   const progressActive = page === "progress";
-  progressPage.classList.toggle("hidden", !progressActive);
   if (progressActive && isDemoMode) loadProgressDemo();
-  document.querySelectorAll("[data-page]").forEach((link) => link.classList.toggle("active", link.dataset.page === page));
-  overviewIntro.classList.toggle("hidden", !overviewActive);
-  emptyState.classList.toggle("hidden", !overviewActive || Boolean(currentActivity));
-  dashboard.classList.toggle("hidden", !overviewActive || !currentActivity);
-  speedEffortPage.classList.toggle("hidden", !analysisActive);
-  analysisEmpty.classList.toggle("hidden", Boolean(currentActivity) || !analysisActive);
-  analysisBody.classList.toggle("hidden", !currentActivity || !analysisActive);
-  coachingPage.classList.toggle("hidden", !coachingActive);
-  coachingEmpty.classList.toggle("hidden", Boolean(currentActivity) || !coachingActive);
-  coachingBody.classList.toggle("hidden", !currentActivity || !coachingActive);
-  trackWaterPage.classList.toggle("hidden", !trackWaterActive);
-  trackWaterEmpty.classList.toggle("hidden", Boolean(currentActivity) || !trackWaterActive);
-  trackWaterBody.classList.toggle("hidden", !currentActivity || !trackWaterActive);
-  if (currentActivity || progressActive) scheduleVisualRender();
+  document.querySelectorAll("[data-page]").forEach((link) => {
+    const active = link.dataset.page === page;
+    link.classList.toggle("active", active);
+    if (active) link.setAttribute("aria-current", "page");
+    else link.removeAttribute("aria-current");
+  });
+  // Each page for one ride shows its empty state until a ride is open; the strip names that ride.
+  [
+    ["coach", coachingPage, emptyState, coachingBody],
+    ["replay", speedEffortPage, analysisEmpty, analysisBody],
+    ["upwind-stops", trackWaterPage, trackWaterEmpty, trackWaterBody],
+    ["body", bodyPage, bodyEmpty, dashboard],
+  ].forEach(([id, section, empty, content]) => {
+    section.classList.toggle("hidden", page !== id);
+    empty.classList.toggle("hidden", hasRide);
+    content.classList.toggle("hidden", !hasRide);
+  });
+  progressPage.classList.toggle("hidden", !progressActive);
+  sessionStrip.classList.toggle("hidden", !hasRide || progressActive);
+  if (hasRide || progressActive) scheduleVisualRender();
 }
 
 function scheduleVisualRender() {
@@ -2645,11 +2743,16 @@ function scheduleVisualRender() {
       return;
     }
     if (!currentActivity) return;
-    if (page === "speed-effort") renderAnalysis(currentActivity);
-    else if (page === "coaching") renderCoaching(currentActivity);
-    else if (page === "track-water") renderTrackWater(currentActivity);
-    else renderCharts(currentActivity);
+    if (page === "replay") renderAnalysis(currentActivity);
+    else if (page === "upwind-stops") renderTrackWater(currentActivity);
+    else if (page === "body") renderBody(currentActivity);
+    else renderCoaching(currentActivity);
   });
+}
+
+function renderThemeToggle() {
+  // The button names the look it switches to.
+  setText("#themeToggleLabel", otherTheme(currentTheme()) === "calm" ? "Calm colours" : "Pop colours");
 }
 
 function renderInventory(activity) {
@@ -2754,18 +2857,11 @@ function renderInventory(activity) {
 }
 
 function render(activity, fileName) {
-  mapZoomState.delete(mapTiles);
-  mapZoomState.delete(analysisMapTiles);
-  mapZoomState.delete(trackWaterMapTiles);
-  mapZoomState.delete(coachingMapTiles);
-  mapPanState.delete(mapTiles);
-  mapPanState.delete(analysisMapTiles);
-  mapPanState.delete(trackWaterMapTiles);
-  mapPanState.delete(coachingMapTiles);
-  mapLayoutCache.delete(mapTiles);
-  mapLayoutCache.delete(analysisMapTiles);
-  mapLayoutCache.delete(trackWaterMapTiles);
-  mapLayoutCache.delete(coachingMapTiles);
+  [analysisMapTiles, trackWaterMapTiles, coachingMapTiles].forEach((tiles) => {
+    mapZoomState.delete(tiles);
+    mapPanState.delete(tiles);
+    mapLayoutCache.delete(tiles);
+  });
   currentActivity = summarize(activity);
   currentActivity.segmentation = segmentTrack(currentActivity.records);
   analysisSelectionIndex = null;
@@ -2779,15 +2875,17 @@ function render(activity, fileName) {
     .map((message) => getField(message, "description"))
     .find((value) => typeof value === "string" && value.trim());
   setText("#fileStatus", fileName);
+  setText("#sessionTitle", sessionTitle(summary));
+  setText("#sessionDate", formatDate(summary.starts));
+  setText("#sessionDuration", formatDuration(summary.duration));
+  setText("#sessionDistance", formatDistance(summary.distance));
   setText("#activitySport", activity.isDemo ? "Demo kite surf" : "Kite surf");
   setText("#activityFile", fileName);
-  setText("#activityTitle", sessionTitle(summary));
   const deviceName = activity.messages
     .filter((message) => message.globalNumber === 23)
     .map((message) => getField(message, "device_name"))
     .find((value) => typeof value === "string" && value.trim());
   setText("#activityDevice", deviceName || "Device not recorded");
-  setText("#activityDate", formatDate(summary.starts));
   setText("#activityDescription", description || "");
   $("#activityNote").classList.toggle("hidden", !description);
   setText("#metricDuration", formatDuration(summary.duration));
@@ -2815,9 +2913,7 @@ function render(activity, fileName) {
   setText("#detailFeeling", formatFeeling(summary.feeling));
   setText("#detailFatRatio", summary.fatRatio === null ? "not recorded" : `${number(summary.fatRatio, 1)}%`);
   setText("#detailAvgNgp", summary.avgNgp === null ? "not recorded" : formatSpeed(summary.avgNgp));
-  setText("#decoderNote", summary.calories === null
-    ? "This export has no usable calorie data. The parser keeps missing FIT values blank instead of inventing a total."
-    : "Unknown fields and developer fields are preserved in the in-memory activity model for future pages.");
+  setCopy("#decoderNote", summary.calories === null ? "This export has no usable calorie data, so calories stay blank." : "");
   renderInventory(activity);
   renderWindPanels(summary);
   updatePage();
@@ -2862,11 +2958,14 @@ async function loadFile(file, name = file.name) {
 input.addEventListener("change", () => {
   if (input.files?.[0]) loadFile(input.files[0]);
 });
-$("#newFileButton").addEventListener("click", () => input.click());
-$("#analysisLoadButton").addEventListener("click", () => input.click());
-$("#coachingLoadButton").addEventListener("click", () => input.click());
-$("#trackWaterLoadButton").addEventListener("click", () => input.click());
+["#analysisLoadButton", "#trackWaterLoadButton", "#bodyLoadButton"].forEach((selector) => $(selector).addEventListener("click", () => input.click()));
 $("#dismissError").addEventListener("click", hideError);
+$("#themeToggle").addEventListener("click", () => {
+  applyTheme(otherTheme(currentTheme()));
+  renderThemeToggle();
+  // Canvas charts hold the old colours until they are drawn again.
+  if (currentActivity || activePage() === "progress") scheduleVisualRender();
+});
 inventoryToggle.addEventListener("click", () => {
   const expanded = inventoryToggle.getAttribute("aria-expanded") === "true";
   inventoryTableWrap.classList.toggle("hidden", expanded);
@@ -2913,6 +3012,13 @@ bindTrackWaterInteractions();
 bindMapPanning(analysisMapCanvas, analysisMapTiles);
 bindMapPanning(trackWaterMapCanvas, trackWaterMapTiles);
 bindMapPanning(coachingMapCanvas, coachingMapTiles);
+
+applyTheme(storedTheme(), { remember: false });
+renderThemeToggle();
+// Chart labels use the page font; draw again once it has arrived so the first paint does not keep the fallback.
+document.fonts?.ready.then(() => {
+  if (currentActivity || activePage() === "progress") scheduleVisualRender();
+});
 
 if (isDemoMode) {
   const demoActivity = createDemoActivity();

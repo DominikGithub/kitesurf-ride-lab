@@ -3,341 +3,95 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#101a20" />
-    <title>Kitesurfe ride lab</title>
+    <meta name="theme-color" content="#1b1464" />
+    <title>Ride Lab</title>
+    <!-- The look is applied before the page paints, so a saved "calm" choice never flashes the default first. -->
+    <script>
+      try {
+        if (window.localStorage.getItem("rideLabTheme") === "calm") document.documentElement.dataset.theme = "calm";
+      } catch (error) {}
+    </script>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <div class="app-shell">
       <aside class="sidebar">
         <div class="sidebar-inner">
-        <div class="brand-lockup">
-          <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
-          <div>
-            <p class="brand-name">Kitesurfe ride lab</p>
-            <p class="brand-caption">ride analytics</p>
+          <div class="brand-lockup">
+            <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+            <p class="brand-name">Ride Lab</p>
           </div>
-        </div>
 
-        <div class="sidebar-rule"></div>
-        <p class="nav-label">Ride lab</p>
-        <nav class="nav-list" aria-label="Workspace pages">
-           <a class="nav-item active" href="#overview" data-page="overview"><span class="nav-index">01</span>Overview</a>
-           <a class="nav-item" href="#speed-effort" data-page="speed-effort"><span class="nav-index">02</span>Session overview</a>
-           <a class="nav-item" href="#track-water" data-page="track-water"><span class="nav-index">03</span>Track &amp; water</a>
-           <a class="nav-item" href="#coaching" data-page="coaching"><span class="nav-index">04</span>Coaching &amp; Growth</a>
-           <a class="nav-item" href="#progress" data-page="progress"><span class="nav-index">05</span>Progress</a>
-        </nav>
+          <label class="button button-open" for="fitInput">Open ride</label>
+          <input id="fitInput" type="file" accept=".fit,.FIT,application/octet-stream" />
 
-        <div class="sidebar-bottom">
-          <div class="local-badge"><span class="pulse-dot"></span>FIT stays local</div>
-          <p>No FIT upload or analytics.<br />OSM tiles and, if needed, a rounded coordinate/date go to Open-Meteo.</p>
-        </div>
+          <p class="nav-label">This ride</p>
+          <nav class="nav-list" aria-label="Pages for this ride">
+            <a class="nav-item" href="#coach" data-page="coach">Coach</a>
+            <a class="nav-item" href="#replay" data-page="replay">Replay</a>
+            <a class="nav-item" href="#upwind-stops" data-page="upwind-stops">Upwind &amp; stops</a>
+            <a class="nav-item" href="#body" data-page="body">Body</a>
+          </nav>
+
+          <div class="nav-group-all">
+            <p class="nav-label">All rides</p>
+            <nav class="nav-list" aria-label="Pages across rides">
+              <a class="nav-item" href="#progress" data-page="progress">Progress <span class="nav-count hidden" id="navRideCount"></span></a>
+            </nav>
+          </div>
+
+          <div class="sidebar-bottom">
+            <button class="theme-toggle" id="themeToggle" type="button"><span class="theme-swatch" aria-hidden="true"><i></i><i></i><i></i></span><span id="themeToggleLabel">Calm colours</span></button>
+            <p>Files stay on this device.</p>
+          </div>
         </div>
       </aside>
 
-      <main class="main-content" id="overview">
-        <header class="topbar">
-          <div>
-           <p class="eyebrow">Kite-surf analysis <span class="slash">/</span> <span id="pageLabel">overview</span></p>
-          </div>
-          <div class="topbar-meta"><span class="topbar-dot"></span><span id="fileStatus">Waiting for a file</span></div>
+      <main class="main-content">
+        <header class="session-strip hidden" id="sessionStrip">
+          <h1 id="sessionTitle">Kite-surf session</h1>
+          <span class="chip" id="sessionDate"></span>
+          <span class="chip" id="sessionDuration"></span>
+          <span class="chip" id="sessionDistance"></span>
+          <span class="chip chip-wind hidden" id="sessionWind"><i class="map-wind-arrow" id="sessionWindArrow" aria-hidden="true"></i><span id="sessionWindText"></span></span>
+          <span class="session-file" id="fileStatus"></span>
         </header>
 
-        <section class="page-intro" id="overviewIntro">
-          <div>
-            <p class="section-number">Ride lab / 00</p>
-            <h1>Read the ride.<br /><em>Improve the next one.</em></h1>
-            <p class="intro-copy">Use speed, effort, and track shape to spot what made a session work. Load a ride and start building better questions for the next one.</p>
-          </div>
-          <div class="import-actions">
-            <label class="button button-primary" for="fitInput"><span class="button-icon">+</span> Choose FIT file</label>
-            <input id="fitInput" type="file" accept=".fit,.FIT,application/octet-stream" />
-            <p class="privacy-note"><span class="lock-icon">□</span> FIT stays in browser. If wind is missing, only one rounded GPS coordinate and UTC dates go to Open-Meteo.</p>
-          </div>
-        </section>
-
-        <section class="empty-state" id="emptyState" aria-live="polite">
-          <div class="empty-grid-mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
-          <p class="empty-kicker">Start with a ride</p>
-          <h2>Drop in a <span>.fit</span> session<br />to find the pattern.</h2>
-          <p>Bring in a Suunto export from a kite-surf session. The app reads the file locally, keeps the original untouched, and turns the first pass into useful signals.</p>
-          <div class="drop-target" id="dropTarget"><span class="drop-arrow">↓</span> Drop file anywhere in this panel</div>
-        </section>
-
-        <section class="dashboard hidden" id="dashboard" aria-live="polite">
-          <div class="activity-hero panel">
-              <div class="hero-main">
-                <div class="hero-kicker"><span class="activity-dot"></span><span id="activitySport">Activity</span><span class="hero-divider">/</span><span id="activityFile">file.fit</span></div>
-                <h2 id="activityTitle">Untitled activity</h2>
-                <div class="activity-note hidden" id="activityNote"><span class="note-label">Description</span><strong id="activityDescription"></strong></div>
-              </div>
-              <div class="hero-side">
-                <div class="device-chip"><span>Recording device</span><strong id="activityDevice">Device not recorded</strong></div>
-                <p id="activityDate">Date not available</p>
-              </div>
-          </div>
-
-          <div class="metric-grid">
-            <article class="metric-card metric-featured">
-              <p class="metric-label">Elapsed time</p>
-              <strong id="metricDuration">—</strong>
-              <span class="metric-sub" id="metricTimer">total session</span>
-            </article>
-            <article class="metric-card">
-              <p class="metric-label">Distance ridden</p>
-              <strong id="metricDistance">—</strong>
-              <span class="metric-sub">recorded route</span>
-            </article>
-            <article class="metric-card">
-              <p class="metric-label">Average speed</p>
-              <strong id="metricAvgSpeed">—</strong>
-              <span class="metric-sub" id="metricMaxSpeed">max —</span>
-            </article>
-            <article class="metric-card">
-              <p class="metric-label">Heart rate</p>
-              <strong id="metricHeartRate">—</strong>
-              <span class="metric-sub" id="metricMaxHeartRate">max —</span>
-            </article>
-          </div>
-
-          <section class="effort-panel panel" aria-live="polite">
-            <div class="panel-heading"><div><p class="panel-kicker">Effort and recovery</p><h3>Training load</h3></div><span class="panel-index">FIT</span></div>
-            <div class="effort-metric-grid">
-              <div class="effort-metric"><span>Reported TSS <button class="info-tip" type="button" title="What is TSS?" aria-label="What is TSS?" data-tooltip="TSS means Training Stress Score. It estimates the overall load of a session from its duration and intensity relative to your threshold. Higher scores indicate a more demanding session.">?</button></span><strong id="effortTss">—</strong><small>duration and intensity load</small></div>
-              <div class="effort-metric"><span>Training Effect <button class="info-tip" type="button" title="What is Training Effect?" aria-label="What is Training Effect?" data-tooltip="Training Effect estimates the session's impact on aerobic fitness from its duration and intensity. Higher scores indicate a stronger training stimulus.">?</button></span><strong id="effortTrainingEffect">—</strong><small>session score</small></div>
-              <div class="effort-metric"><span>Peak EPOC <button class="info-tip" type="button" title="What is Peak EPOC?" aria-label="What is Peak EPOC?" data-tooltip="Peak EPOC estimates the highest accumulated excess oxygen demand during the session. Higher values generally indicate greater training load and recovery demand.">?</button></span><strong id="effortEpoc">—</strong><small>l/kg</small></div>
-              <div class="effort-metric"><span>Recovery time</span><strong id="effortRecovery">—</strong><small id="effortRecoveryEnd">recommended</small></div>
+        <section class="page coaching-page" id="coachingPage" aria-live="polite">
+          <section class="empty-state panel" id="emptyState">
+            <p class="empty-kicker">Start here</p>
+            <h2>Drop in a <span>.fit</span> ride.</h2>
+            <p>Get three things to work on, from your turns, stops and speed.</p>
+            <div class="empty-actions">
+              <label class="button button-primary" for="fitInput">Open ride</label>
+              <span class="drop-target" id="dropTarget">or drop the file here</span>
             </div>
-            <div class="effort-zone-row">
-              <div class="effort-zone-heading"><span>Heart-rate zones</span><small>time recorded in each zone</small></div>
-              <div class="effort-zone-grid">
-                <div class="effort-zone"><span>Zone 1</span><strong id="effortZone1">—</strong></div>
-                <div class="effort-zone"><span>Zone 2</span><strong id="effortZone2">—</strong></div>
-                <div class="effort-zone"><span>Zone 3</span><strong id="effortZone3">—</strong></div>
-                <div class="effort-zone"><span>Zone 4</span><strong id="effortZone4">—</strong></div>
-                <div class="effort-zone"><span>Zone 5</span><strong id="effortZone5">—</strong></div>
-              </div>
-            </div>
-          </section>
-
-           <div class="content-grid">
-            <article class="panel chart-panel chart-wide speed-panel">
-              <div class="panel-heading">
-                <div><p class="panel-kicker">Timeline</p><h3>Speed trace</h3></div>
-                <span class="chart-unit">km/h</span>
-              </div>
-              <div class="chart-wrap"><canvas id="speedChart" aria-label="Speed over time chart"></canvas><div class="chart-empty hidden" id="speedEmpty">No speed records in this file</div></div>
-              <div class="chart-footer"><span id="speedStart">start</span><span class="chart-key"><i class="key-line speed-key"></i>speed</span><span id="speedEnd">finish</span></div>
-            </article>
-
-            <article class="panel chart-panel heart-panel">
-              <div class="panel-heading">
-                <div><p class="panel-kicker">Response</p><h3>Heart rate</h3></div>
-                <span class="chart-unit">bpm</span>
-              </div>
-              <div class="chart-wrap"><canvas id="heartChart" aria-label="Heart rate over time chart"></canvas><div class="chart-empty hidden" id="heartEmpty">No heart-rate records</div></div>
-              <div class="chart-footer"><span id="heartMin">min —</span><span class="chart-key"><i class="key-line heart-key"></i>heart rate</span><span id="heartMax">max —</span></div>
-            </article>
-
-             <article class="panel detail-panel">
-               <div class="panel-heading"><div><p class="panel-kicker">Ride snapshot</p><h3>At a glance</h3></div><span class="panel-index">OVERVIEW</span></div>
-               <dl class="detail-list">
-                  <div><dt>Started / Ended</dt><dd id="detailTimeRange">—</dd></div>
-                 <div><dt>Duration</dt><dd id="detailDuration">—</dd></div>
-                 <div><dt>Feeling</dt><dd id="detailFeeling">—</dd></div>
-                 <div><dt>Calories</dt><dd id="detailCalories">—</dd></div>
-                 <div><dt>Carbohydrates</dt><dd id="detailCarbs">—</dd></div>
-                 <div><dt>Fat</dt><dd id="detailFat">—</dd></div>
-                 <div><dt>Fat ratio <button class="info-tip" type="button" title="What is fat ratio?" aria-label="What is fat ratio?" data-tooltip="Fat ratio is the estimated percentage of energy supplied by fat. This dashboard shows the average of the file's recorded samples.">?</button></dt><dd id="detailFatRatio">—</dd></div>
-                 <div><dt>Average NGP <button class="info-tip" type="button" title="What is NGP?" aria-label="What is NGP?" data-tooltip="NGP means normalized graded pace: an effort-adjusted equivalent speed or pace that accounts for terrain or grade, making efforts easier to compare.">?</button></dt><dd id="detailAvgNgp">—</dd></div>
-                 <div><dt>Wind speed</dt><dd id="detailWindSpeed">—</dd></div>
-               </dl>
-            </article>
-
-            <article class="panel map-panel">
-              <div class="panel-heading">
-                 <div><p class="panel-kicker">Location</p><h3>GPS track</h3></div>
-                 <div class="map-heading-meta"><span class="map-wind-indicator hidden" id="mapWindIndicator" aria-live="polite"><span>Wind direction</span><i class="map-wind-arrow" id="mapWindArrow" aria-hidden="true"></i></span><span class="chart-unit" id="mapAccuracy" aria-live="polite"></span></div>
-              </div>
-               <div class="map-wrap"><div class="map-tiles" id="mapTiles" aria-hidden="true"></div><canvas id="mapCanvas" aria-label="GPS location track map"></canvas><div class="map-attribution">© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap contributors</a></div><div class="chart-empty hidden" id="mapEmpty">No GPS track in this file</div></div>
-               <div class="chart-footer"><span id="mapPointCount">0 points</span><span class="chart-key"><i class="key-line map-key"></i>track</span><span class="map-marker-key"><i class="map-marker-dot start"></i>start position</span><span class="map-marker-key"><i class="map-marker-dot end"></i>end position</span></div>
-            </article>
-          </div>
-
-           <section class="inventory-section">
-               <div class="inventory-heading"><div class="inventory-heading-copy"><p class="panel-kicker">Technical record</p><h3>Session data record</h3><p class="inventory-description">Technical overview of the data recorded in your personal .fit session.</p></div><button class="button button-secondary inventory-toggle" id="inventoryToggle" type="button" aria-controls="inventoryTableWrap" aria-expanded="false">Show inventory</button></div>
-             <div class="inventory-table-wrap hidden" id="inventoryTableWrap">
-              <table class="inventory-table">
-                <thead><tr><th>Message</th><th>What it describes</th><th class="table-number">Count</th><th>Data points</th></tr></thead>
-                <tbody id="inventoryBody"></tbody>
-              </table>
-            </div>
-          </section>
-
-          <div class="dashboard-footnote"><span class="footnote-mark">✳</span><span id="decoderNote">Unknown fields are preserved in the in-memory activity model for future pages.</span><button class="text-button" id="newFileButton" type="button">Open another file ↗</button></div>
-           </section>
-
-        <section class="speed-effort-page hidden" id="speedEffortPage" aria-live="polite">
-          <div class="analysis-hero">
-            <div>
-              <p class="section-number">Ride lab / 02</p>
-              <h1>Read the <em>whole session.</em></h1>
-              <p class="intro-copy">Review wind, speed, heart rate, and track shape together to understand how the session unfolded.</p>
-            </div>
-            <div class="analysis-instruction panel">
-              <span class="analysis-instruction-number">01</span>
-              <div><strong>Hover to link the ride</strong><p>Move across either chart or the track. The nearest time point is highlighted in all three views.</p></div>
-            </div>
-          </div>
-
-          <section class="analysis-empty panel" id="analysisEmpty">
-            <p class="empty-kicker">Analysis needs a ride</p>
-            <h2>Load a session to see<br /><span>speed on the water.</span></h2>
-            <p>The FIT stays local. If wind needs annotation, the browser only shares one rounded coordinate and UTC session dates with Open-Meteo.</p>
-            <button class="button button-primary" id="analysisLoadButton" type="button">Choose FIT file <span class="button-icon">+</span></button>
-          </section>
-
-          <div class="analysis-body hidden" id="analysisBody">
-            <div class="analysis-session panel">
-              <div>
-                <p class="panel-kicker">Session in focus</p>
-                <h2 id="analysisActivityTitle">Kite-surf session</h2>
-                <p id="analysisActivityDate">Date not available</p>
-              </div>
-              <div class="analysis-session-tag"><span class="pulse-dot"></span>linked time series</div>
-            </div>
-
-            <section class="analysis-wind-panel panel" aria-live="polite">
-               <div class="panel-heading"><div><p class="panel-kicker">Conditions and technique</p><h3>Wind on the water</h3></div><span class="wind-status" id="analysisWindStatus">Checking local FIT data</span></div>
-               <div class="analysis-wind-layout">
-                 <div class="analysis-wind-details">
-                   <div class="analysis-wind-grid">
-                     <div class="analysis-wind-item"><span>Wind speed</span><strong id="analysisWindSpeed">—</strong></div>
-                     <div class="analysis-wind-item"><span>Direction</span><strong id="analysisWindDirection">—</strong></div>
-                     <div class="analysis-wind-item"><span>Gusts</span><strong id="analysisWindGusts">—</strong></div>
-                     <div class="analysis-wind-item"><span>Coverage</span><strong id="analysisWindCoverage">—</strong></div>
-                   </div>
-                   <p class="wind-message" id="analysisWindMessage">Looking for weather data saved in this FIT file.</p>
-                 </div>
-                 <div class="analysis-wind-chart">
-                   <div class="analysis-wind-chart-heading"><div><h3>Wind direction</h3></div><span class="chart-unit">deg</span></div>
-                   <div class="analysis-chart-wrap"><canvas id="analysisWindChart" aria-label="Interactive wind direction over time chart"></canvas><div class="chart-empty hidden" id="analysisWindEmpty">No wind direction records</div></div>
-                    <div class="chart-footer"><span>start</span><span>finish</span></div>
-                 </div>
-               </div>
-            </section>
-
-            <section class="session-analytics-panel panel">
-              <div class="panel-heading"><div><p class="panel-kicker">Session analytics</p><h3>Technique readout</h3></div><span class="panel-index">RIDE</span></div>
-               <div class="wind-coaching-grid">
-                 <div class="wind-coaching-item" data-map-focus="bestVmg"><span>Best upwind VMG</span><strong id="analysisBestVmg">—</strong><small id="analysisBestVmgDetail">Needs complete wind coverage</small></div>
-                 <div class="wind-coaching-item" data-map-focus="tackAngle"><span>Best tack angle</span><strong id="analysisTackAngle">—</strong><small id="analysisTackAngleDetail">Needs complete wind coverage</small></div>
-                 <div class="wind-coaching-item" data-map-focus="turn"><span>Downwind drift / turn</span><strong id="analysisTurnDrift">—</strong><small id="analysisTurnDriftDetail">Needs complete wind coverage</small></div>
-                 <div class="wind-coaching-item" data-map-focus="legComparison"><span>Best leg comparison</span><strong id="analysisLegComparison">—</strong><small id="analysisLegComparisonDetail">Needs complete wind coverage</small></div>
-               </div>
-            </section>
-
-            <section class="analysis-readout panel">
-              <div class="analysis-readout-grid">
-                <div class="analysis-readout-item"><span>Timestamp</span><strong id="analysisPointTimestamp">—</strong></div>
-                <div class="analysis-readout-item"><span>Time into ride</span><strong id="analysisPointTime">—</strong></div>
-                <div class="analysis-readout-item"><span>Speed</span><strong id="analysisPointSpeed">—</strong></div>
-                <div class="analysis-readout-item"><span>Heart rate</span><strong id="analysisPointHeart">—</strong></div>
-                <div class="analysis-readout-item"><span>Distance</span><strong id="analysisPointDistance">—</strong></div>
-              </div>
-            </section>
-
-            <div class="analysis-grid">
-               <article class="panel analysis-map-panel">
-                 <div class="panel-heading">
-                    <div><p class="panel-kicker">Where it happened</p><h3>GPS track</h3></div>
-                    <div class="map-heading-meta"><span class="map-wind-indicator hidden" id="analysisMapWindIndicator" aria-live="polite"><span>Wind direction</span><i class="map-wind-arrow" id="analysisMapWindArrow" aria-hidden="true"></i></span><span class="chart-unit" id="analysisMapAccuracy"></span></div>
-                 </div>
-                 <div class="analysis-map-wrap"><div class="map-tiles" id="analysisMapTiles" aria-hidden="true"></div><canvas id="analysisMapCanvas" aria-label="Interactive GPS track map"></canvas><div class="map-zoom-controls" aria-label="Map zoom controls"><button type="button" data-map-zoom="in" data-map-zoom-target="analysis" aria-label="Zoom in" title="Zoom in">+</button><button type="button" data-map-zoom="out" data-map-zoom-target="analysis" aria-label="Zoom out" title="Zoom out">-</button><button type="button" data-map-zoom="fit" data-map-zoom-target="analysis" aria-label="Fit track to map" title="Fit track to map">fit</button></div><div class="map-attribution">© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap contributors</a></div><div class="chart-empty hidden" id="analysisMapEmpty">No GPS track in this file</div></div>
-                  <div class="chart-footer"><span id="analysisMapPointCount">0 points</span><span class="chart-key"><i class="key-line map-key"></i>track</span><span class="map-marker-key"><i class="map-marker-dot start"></i>start position</span><span class="map-marker-key"><i class="map-marker-dot end"></i>end position</span></div>
-              </article>
-
-              <article class="panel analysis-chart-panel">
-                <div class="panel-heading">
-                  <div><p class="panel-kicker">Board response</p><h3>Speed</h3></div>
-                  <span class="chart-unit">km/h</span>
-                </div>
-                <div class="analysis-chart-wrap"><canvas id="analysisSpeedChart" aria-label="Interactive speed over time chart"></canvas><div class="chart-empty hidden" id="analysisSpeedEmpty">No speed records in this file</div></div>
-                <div class="chart-footer"><span>start</span><span class="chart-key"><i class="key-line speed-key"></i>speed</span><span id="analysisSpeedEnd">finish</span></div>
-              </article>
-
-              <article class="panel analysis-chart-panel">
-                <div class="panel-heading">
-                  <div><p class="panel-kicker">Body response</p><h3>Heart rate</h3></div>
-                  <span class="chart-unit">bpm</span>
-                </div>
-                <div class="analysis-chart-wrap"><canvas id="analysisHeartChart" aria-label="Interactive heart rate over time chart"></canvas><div class="chart-empty hidden" id="analysisHeartEmpty">No heart-rate records</div></div>
-                <div class="chart-footer"><span id="analysisHeartMin">min —</span><span class="chart-key"><i class="key-line heart-key"></i>heart rate</span><span id="analysisHeartMax">max —</span></div>
-              </article>
-
-            </div>
-            <div class="analysis-coaching-grid">
-              <article class="analysis-coaching-note"><span class="analysis-note-mark">A</span><div><strong>Read the fast sections</strong><p>Use the map marker to see whether your highest speeds come from a clean reach, a turn, or a section where the line wandered.</p></div></article>
-              <article class="analysis-coaching-note"><span class="analysis-note-mark coral">B</span><div><strong>Watch the response</strong><p>When speed drops but heart rate stays high, look for technique or recovery opportunities before adding more effort.</p></div></article>
-            </div>
-         </div>
-        </section>
-
-        <section class="coaching-page hidden" id="coachingPage" aria-live="polite">
-          <div class="analysis-hero">
-            <div>
-              <p class="section-number">Ride lab / 04</p>
-              <h1>Coach the <em>next session.</em></h1>
-              <p class="intro-copy">Turns, stops, both riding directions, and how the session held up over time, worked out from GPS and speed.</p>
-            </div>
-            <div class="analysis-instruction panel">
-              <span class="analysis-instruction-number">01</span>
-              <div><strong>Start with the takeaways</strong><p>They are picked by rule from the numbers below. Hover a turn in the chart or on the map to see what it cost and where it happened.</p></div>
-            </div>
-          </div>
-
-          <section class="analysis-empty panel" id="coachingEmpty">
-            <p class="empty-kicker">Coaching needs a ride</p>
-            <h2>Load a session to see<br /><span>what to work on.</span></h2>
-            <p>Turn quality, side balance, stops, and fatigue are worked out in the browser from the track. The FIT stays local.</p>
-            <button class="button button-primary" id="coachingLoadButton" type="button">Choose FIT file <span class="button-icon">+</span></button>
           </section>
 
           <div class="coaching-body hidden" id="coachingBody">
-            <div class="analysis-session panel">
-              <div>
-                <p class="panel-kicker">Session in focus</p>
-                <h2 id="coachingActivityTitle">Kite-surf session</h2>
-                <p id="coachingActivityDate">Date not available</p>
-              </div>
-              <div class="analysis-session-tag"><span class="pulse-dot"></span>from gps and speed</div>
-            </div>
-
             <section class="analysis-empty panel hidden" id="coachingUnavailable">
               <p class="empty-kicker">Nothing to coach yet</p>
-              <h2>No riding was found<br /><span>in this session.</span></h2>
-              <p>Coaching needs at least one stretch of sustained riding speed. Track &amp; water shows what was detected.</p>
+              <h2>No riding found <span>in this ride.</span></h2>
+              <p>Coaching needs one stretch of steady riding speed. Upwind &amp; stops shows what was detected.</p>
             </section>
 
             <div class="coaching-sections" id="coachingSections">
-              <section class="coaching-panel panel">
-                <div class="panel-heading"><div><p class="panel-kicker">Session takeaways</p><h3>What stood out</h3></div><span class="panel-index">RULE-BASED</span></div>
-                <div class="coaching-takeaways" id="coachingTakeaways"></div>
-              </section>
+              <div class="coaching-takeaways" id="coachingTakeaways" aria-label="What stood out"></div>
 
               <section class="coaching-panel panel">
-                <div class="panel-heading"><div><p class="panel-kicker">Turn quality</p><h3>Speed kept through each turn</h3></div><span class="chart-unit">% of entry speed</span></div>
-                <p class="coaching-copy" id="coachingTurnCopy"></p>
+                <div class="panel-heading">
+                  <h3>Speed kept through each turn <button class="info-tip" type="button" id="coachingTurnTip" aria-label="How turns are measured" data-tooltip="">?</button></h3>
+                  <span class="chart-unit">% of entry speed</span>
+                </div>
                 <div class="segments-stat-grid" id="coachingTurnStats"></div>
                 <div class="coaching-legend" id="coachingTurnLegend"></div>
                 <div class="coaching-turn-views">
-                <div class="coaching-chart-wrap" id="coachingTurnChartWrap">
-                  <canvas id="coachingTurnChart" aria-label="Speed kept through each turn over the session"></canvas>
-                  <div class="coaching-tooltip hidden" id="coachingTurnTooltip" role="status"></div>
-                  <div class="chart-empty hidden" id="coachingTurnEmpty">No turns were found in this session</div>
-                </div>
-                <div class="segments-map-wrap coaching-map-wrap" id="coachingMapWrap"><div class="map-tiles" id="coachingMapTiles" aria-hidden="true"></div><canvas id="coachingMapCanvas" aria-label="Map of the track with every turn where it happened"></canvas><div class="map-zoom-controls" aria-label="Turn map controls"><button type="button" data-map-zoom="in" data-map-zoom-target="coaching" aria-label="Zoom in" title="Zoom in">+</button><button type="button" data-map-zoom="out" data-map-zoom-target="coaching" aria-label="Zoom out" title="Zoom out">-</button><button type="button" data-map-zoom="fit" data-map-zoom-target="coaching" aria-label="Fit map to track" title="Fit track">fit</button></div><div class="map-attribution">© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap contributors</a></div><div class="chart-empty hidden" id="coachingMapEmpty">No GPS track in this file</div></div>
+                  <div class="coaching-chart-wrap" id="coachingTurnChartWrap">
+                    <canvas id="coachingTurnChart" aria-label="Speed kept through each turn over the session"></canvas>
+                    <div class="coaching-tooltip hidden" id="coachingTurnTooltip" role="status"></div>
+                    <div class="chart-empty hidden" id="coachingTurnEmpty">No turns were found in this session</div>
+                  </div>
+                  <div class="segments-map-wrap coaching-map-wrap" id="coachingMapWrap"><div class="map-tiles" id="coachingMapTiles" aria-hidden="true"></div><canvas id="coachingMapCanvas" aria-label="Map of the track with every turn where it happened"></canvas><div class="map-zoom-controls" aria-label="Turn map controls"><button type="button" data-map-zoom="in" data-map-zoom-target="coaching" aria-label="Zoom in" title="Zoom in">+</button><button type="button" data-map-zoom="out" data-map-zoom-target="coaching" aria-label="Zoom out" title="Zoom out">-</button><button type="button" data-map-zoom="fit" data-map-zoom-target="coaching" aria-label="Fit map to track" title="Fit track">fit</button></div><div class="map-attribution">© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap contributors</a></div><div class="chart-empty hidden" id="coachingMapEmpty">No GPS track in this file</div></div>
                 </div>
                 <p class="coaching-map-note" id="coachingMapNote"></p>
                 <details class="coaching-details">
@@ -353,21 +107,22 @@
 
               <div class="coaching-columns">
                 <section class="coaching-panel panel">
-                  <div class="panel-heading"><div><p class="panel-kicker">Side balance</p><h3>One direction against the other</h3></div></div>
-                  <p class="coaching-copy">Legs are grouped by the two directions you reach in. A clear gap between the columns points to a weaker side.</p>
+                  <div class="panel-heading"><h3>Side balance <button class="info-tip" type="button" aria-label="How the sides are compared" data-tooltip="Legs are grouped by the two directions you reach in. A clear gap between the columns points to a weaker side.">?</button></h3></div>
                   <table class="coaching-table coaching-side-table" id="coachingSideTable"></table>
                 </section>
 
                 <section class="coaching-panel panel">
-                  <div class="panel-heading"><div><p class="panel-kicker">Stops and restarts</p><h3>Time off the board</h3></div></div>
-                  <p class="coaching-copy" id="coachingStopCopy"></p>
+                  <div class="panel-heading"><h3>Stops <button class="info-tip" type="button" id="coachingStopTip" aria-label="What counts as a stop" data-tooltip="">?</button></h3></div>
                   <div class="segments-stat-grid coaching-stat-grid-2" id="coachingStopStats"></div>
                 </section>
               </div>
 
               <section class="coaching-panel panel">
-                <div class="panel-heading"><div><p class="panel-kicker">Upwind performance</p><h3>Angle to the wind and ground gained</h3></div><span class="chart-unit" id="coachingUpwindSource"></span></div>
-                <p class="coaching-copy" id="coachingUpwindCopy"></p>
+                <div class="panel-heading">
+                  <h3>Upwind <button class="info-tip" type="button" id="coachingUpwindTip" aria-label="How the upwind figures are worked out" data-tooltip="">?</button></h3>
+                  <span class="chart-unit" id="coachingUpwindSource"></span>
+                </div>
+                <p class="coaching-copy hidden" id="coachingUpwindCopy"></p>
                 <div class="segments-stat-grid" id="coachingUpwindStats"></div>
                 <details class="coaching-details" id="coachingUpwindSections">
                   <summary><span><span class="when-closed">Show</span><span class="when-open">Hide</span> ground gained in each ride section</span></summary>
@@ -381,7 +136,7 @@
               </section>
 
               <section class="coaching-panel panel">
-                <div class="panel-heading"><div><p class="panel-kicker">Fatigue over the session</p><h3>Four quarters of equal riding time</h3></div></div>
+                <div class="panel-heading"><h3>Fatigue</h3><span class="chart-unit">four quarters of equal riding time</span></div>
                 <p class="coaching-copy" id="coachingFatigueCopy"></p>
                 <div class="coaching-table-scroll">
                   <table class="coaching-table" id="coachingFatigueTable">
@@ -391,63 +146,117 @@
                 </div>
               </section>
 
-              <section class="coaching-panel panel">
-                <div class="panel-heading"><div><p class="panel-kicker">Personal bests</p><h3>Best efforts in this session</h3></div></div>
+              <section class="coaching-panel panel bests-panel">
+                <div class="panel-heading"><h3>Bests</h3></div>
                 <div class="segments-stat-grid coaching-stat-grid-5" id="coachingBestStats"></div>
               </section>
             </div>
           </div>
         </section>
 
-        <section class="coaching-page track-water-page hidden" id="trackWaterPage" aria-live="polite">
-          <div class="analysis-hero">
-            <div>
-              <p class="section-number">Ride lab / 03</p>
-              <h1>Read the <em>water.</em></h1>
-              <p class="intro-copy">Where you gained and lost ground against the wind, where you came back in, where the stops happened, and where you were fast.</p>
-            </div>
-            <div class="analysis-instruction panel">
-              <span class="analysis-instruction-number">01</span>
-              <div><strong>Up is upwind</strong><p>The first two plots are turned so the wind comes from the top. The map below keeps north at the top.</p></div>
+        <section class="page speed-effort-page hidden" id="speedEffortPage" aria-live="polite">
+          <section class="analysis-empty panel" id="analysisEmpty">
+            <p class="empty-kicker">Replay needs a ride</p>
+            <h2>Load a ride to see <span>speed on the water.</span></h2>
+            <button class="button button-primary" id="analysisLoadButton" type="button">Open ride</button>
+          </section>
+
+          <div class="analysis-body hidden" id="analysisBody">
+            <section class="analysis-wind-panel panel" aria-live="polite">
+              <div class="panel-heading"><h3>Wind</h3><span class="wind-status" id="analysisWindStatus">Checking local FIT data</span></div>
+              <div class="analysis-wind-layout">
+                <div class="analysis-wind-details">
+                  <div class="analysis-wind-grid">
+                    <div class="analysis-wind-item"><span>Wind speed</span><strong id="analysisWindSpeed">—</strong></div>
+                    <div class="analysis-wind-item"><span>Direction</span><strong id="analysisWindDirection">—</strong></div>
+                    <div class="analysis-wind-item"><span>Gusts</span><strong id="analysisWindGusts">—</strong></div>
+                    <div class="analysis-wind-item"><span>Coverage</span><strong id="analysisWindCoverage">—</strong></div>
+                  </div>
+                  <p class="wind-message" id="analysisWindMessage">Looking for weather data saved in this FIT file.</p>
+                </div>
+                <div class="analysis-wind-chart">
+                  <div class="analysis-wind-chart-heading"><h4>Wind direction</h4><span class="chart-unit">deg</span></div>
+                  <div class="analysis-chart-wrap"><canvas id="analysisWindChart" aria-label="Interactive wind direction over time chart"></canvas><div class="chart-empty hidden" id="analysisWindEmpty">No wind direction records</div></div>
+                  <div class="chart-footer"><span>start</span><span>finish</span></div>
+                </div>
+              </div>
+            </section>
+
+            <section class="session-analytics-panel panel">
+              <div class="panel-heading"><h3>Technique</h3></div>
+              <div class="wind-coaching-grid">
+                <div class="wind-coaching-item" data-map-focus="bestVmg"><span>Best upwind VMG</span><strong id="analysisBestVmg">—</strong><small id="analysisBestVmgDetail">Needs complete wind coverage</small></div>
+                <div class="wind-coaching-item" data-map-focus="tackAngle"><span>Best tack angle</span><strong id="analysisTackAngle">—</strong><small id="analysisTackAngleDetail">Needs complete wind coverage</small></div>
+                <div class="wind-coaching-item" data-map-focus="turn"><span>Downwind drift / turn</span><strong id="analysisTurnDrift">—</strong><small id="analysisTurnDriftDetail">Needs complete wind coverage</small></div>
+                <div class="wind-coaching-item" data-map-focus="legComparison"><span>Best leg comparison</span><strong id="analysisLegComparison">—</strong><small id="analysisLegComparisonDetail">Needs complete wind coverage</small></div>
+              </div>
+            </section>
+
+            <section class="analysis-readout panel" aria-label="The moment under the pointer">
+              <div class="analysis-readout-grid">
+                <div class="analysis-readout-item"><span>Timestamp</span><strong id="analysisPointTimestamp">—</strong></div>
+                <div class="analysis-readout-item"><span>Time into ride</span><strong id="analysisPointTime">—</strong></div>
+                <div class="analysis-readout-item"><span>Speed</span><strong id="analysisPointSpeed">—</strong></div>
+                <div class="analysis-readout-item"><span>Heart rate</span><strong id="analysisPointHeart">—</strong></div>
+                <div class="analysis-readout-item"><span>Distance</span><strong id="analysisPointDistance">—</strong></div>
+              </div>
+            </section>
+
+            <div class="analysis-grid">
+              <article class="panel analysis-map-panel">
+                <div class="panel-heading">
+                  <h3>Track</h3>
+                  <div class="map-heading-meta"><span class="map-wind-indicator hidden" id="analysisMapWindIndicator" aria-live="polite"><span>Wind</span><i class="map-wind-arrow" id="analysisMapWindArrow" aria-hidden="true"></i></span><span class="chart-unit" id="analysisMapAccuracy"></span></div>
+                </div>
+                <div class="analysis-map-wrap"><div class="map-tiles" id="analysisMapTiles" aria-hidden="true"></div><canvas id="analysisMapCanvas" aria-label="Interactive GPS track map"></canvas><div class="map-zoom-controls" aria-label="Map zoom controls"><button type="button" data-map-zoom="in" data-map-zoom-target="analysis" aria-label="Zoom in" title="Zoom in">+</button><button type="button" data-map-zoom="out" data-map-zoom-target="analysis" aria-label="Zoom out" title="Zoom out">-</button><button type="button" data-map-zoom="fit" data-map-zoom-target="analysis" aria-label="Fit track to map" title="Fit track to map">fit</button></div><div class="map-attribution">© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap contributors</a></div><div class="chart-empty hidden" id="analysisMapEmpty">No GPS track in this file</div></div>
+                <div class="chart-footer"><span id="analysisMapPointCount">0 points</span><span class="chart-key"><i class="key-line map-key"></i>track</span><span class="map-marker-key"><i class="map-marker-dot start"></i>start</span><span class="map-marker-key"><i class="map-marker-dot end"></i>end</span></div>
+              </article>
+
+              <article class="panel analysis-chart-panel">
+                <div class="panel-heading"><h3>Speed</h3><span class="chart-unit">km/h</span></div>
+                <div class="analysis-chart-wrap"><canvas id="analysisSpeedChart" aria-label="Interactive speed over time chart"></canvas><div class="chart-empty hidden" id="analysisSpeedEmpty">No speed records in this file</div></div>
+                <div class="chart-footer"><span>start</span><span class="chart-key"><i class="key-line speed-key"></i>speed</span><span id="analysisSpeedEnd">finish</span></div>
+              </article>
+
+              <article class="panel analysis-chart-panel">
+                <div class="panel-heading"><h3>Heart rate</h3><span class="chart-unit">bpm</span></div>
+                <div class="analysis-chart-wrap"><canvas id="analysisHeartChart" aria-label="Interactive heart rate over time chart"></canvas><div class="chart-empty hidden" id="analysisHeartEmpty">No heart-rate records</div></div>
+                <div class="chart-footer"><span id="analysisHeartMin">min —</span><span class="chart-key"><i class="key-line heart-key"></i>heart rate</span><span id="analysisHeartMax">max —</span></div>
+              </article>
             </div>
           </div>
+        </section>
 
+        <section class="page track-water-page hidden" id="trackWaterPage" aria-live="polite">
           <section class="analysis-empty panel" id="trackWaterEmpty">
-            <p class="empty-kicker">Track &amp; water needs a ride</p>
-            <h2>Load a session to see<br /><span>where it happened.</span></h2>
-            <p>Ground gained upwind, launch against landing, and where stops cluster are worked out in the browser from the GPS track. The FIT stays local.</p>
-            <button class="button button-primary" id="trackWaterLoadButton" type="button">Choose FIT file <span class="button-icon">+</span></button>
+            <p class="empty-kicker">Upwind &amp; stops needs a ride</p>
+            <h2>Load a ride to see <span>where it happened.</span></h2>
+            <button class="button button-primary" id="trackWaterLoadButton" type="button">Open ride</button>
           </section>
 
           <div class="coaching-body hidden" id="trackWaterBody">
-            <div class="analysis-session panel">
-              <div>
-                <p class="panel-kicker">Session in focus</p>
-                <h2 id="trackWaterActivityTitle">Kite-surf session</h2>
-                <p id="trackWaterActivityDate">Date not available</p>
-              </div>
-              <div class="analysis-session-tag"><span class="pulse-dot"></span>from gps and wind</div>
-            </div>
-
             <section class="analysis-empty panel hidden" id="trackWaterUnavailable">
               <p class="empty-kicker">Nothing to place yet</p>
-              <h2>No riding with a GPS track<br /><span>in this session.</span></h2>
-              <p>This page needs at least one stretch of sustained riding speed and GPS positions to go with it.</p>
+              <h2>No riding with a GPS track <span>in this ride.</span></h2>
+              <p>This page needs one stretch of steady riding speed and GPS positions to go with it.</p>
             </section>
 
             <div class="coaching-sections" id="trackWaterSections">
               <section class="coaching-panel panel">
-                <div class="panel-heading"><div><p class="panel-kicker">Holding ground</p><h3>Position upwind of the launch</h3></div><span class="chart-unit" id="trackWaterWindSource"></span></div>
-                <p class="coaching-copy" id="trackWaterUpwindCopy"></p>
+                <div class="panel-heading">
+                  <h3>Ground gained <button class="info-tip" type="button" id="trackWaterUpwindTip" aria-label="How to read these plots" data-tooltip="">?</button></h3>
+                  <span class="chart-unit" id="trackWaterWindSource"></span>
+                </div>
+                <p class="coaching-copy hidden" id="trackWaterUpwindCopy"></p>
                 <div class="segments-stat-grid" id="trackWaterUpwindStats"></div>
                 <div class="track-water-plots" id="trackWaterPlots">
                   <div class="track-water-plot">
-                    <p class="track-water-plot-title">Track with the wind from the top</p>
+                    <p class="track-water-plot-title">Track, wind from the top</p>
                     <div class="track-water-plot-wrap track-water-plot-square"><canvas id="trackWaterWindPlot" aria-label="GPS track turned so the wind comes from the top"></canvas></div>
                     <div class="coaching-legend"><span><i class="track-water-line is-riding"></i>riding</span><span><i class="track-water-line is-idle"></i>not riding</span><span><i class="map-marker-dot start"></i>launch</span><span><i class="map-marker-dot end"></i>landing</span></div>
                   </div>
                   <div class="track-water-plot">
-                    <p class="track-water-plot-title">Metres upwind of the launch over the session</p>
+                    <p class="track-water-plot-title">Metres upwind of the launch</p>
                     <div class="track-water-plot-wrap" id="trackWaterChartWrap">
                       <canvas id="trackWaterUpwindChart" aria-label="Position upwind of the launch over the session"></canvas>
                       <div class="coaching-tooltip hidden" id="trackWaterChartTooltip" role="status"></div>
@@ -459,7 +268,7 @@
 
               <section class="coaching-panel panel">
                 <div class="panel-heading">
-                  <div><p class="panel-kicker">On the spot</p><h3 id="trackWaterMapTitle">Where the stops happened</h3></div>
+                  <h3><span id="trackWaterMapTitle">Where the stops happened</span> <button class="info-tip" type="button" id="trackWaterMapTip" aria-label="How to read this map" data-tooltip="">?</button></h3>
                   <div class="track-water-toggle" role="group" aria-label="What the map shows"><button type="button" data-track-water-mode="stops" aria-pressed="true">Stops</button><button type="button" data-track-water-mode="speed" aria-pressed="false">Speed</button></div>
                 </div>
                 <p class="coaching-copy" id="trackWaterMapCopy"></p>
@@ -477,47 +286,135 @@
               </section>
 
               <section class="coaching-panel panel">
-                <div class="panel-heading"><div><p class="panel-kicker">Ride sections</p><h3>What happened in each section</h3></div><span class="chart-unit" id="trackWaterSectionsCount"></span></div>
-                <p class="coaching-copy" id="trackWaterSectionsCopy"></p>
+                <div class="panel-heading">
+                  <h3>Ride sections <button class="info-tip" type="button" id="trackWaterSectionsTip" aria-label="What a ride section is" data-tooltip="">?</button></h3>
+                  <span class="chart-unit" id="trackWaterSectionsCount"></span>
+                </div>
                 <div class="coaching-table-scroll">
                   <table class="coaching-table track-water-sections-table">
                     <thead><tr><th>Section</th><th class="is-number">Duration</th><th class="is-number">Distance</th><th class="is-number">Legs</th><th class="is-number">Speed</th><th class="is-number">Heart rate</th><th class="is-number">Stops</th><th class="is-number">Ground gained</th></tr></thead>
                     <tbody id="trackWaterSectionsBody"></tbody>
                   </table>
                 </div>
-                <p class="coaching-copy track-water-sections-hint">Select a section to highlight it on the map above.</p>
+                <p class="coaching-copy track-water-sections-hint">Select a section to highlight it on the map.</p>
               </section>
             </div>
           </div>
         </section>
 
-        <section class="coaching-page progress-page hidden" id="progressPage" aria-live="polite">
-          <input id="progressInput" type="file" accept=".fit,.FIT,application/octet-stream" multiple hidden />
-          <div class="analysis-hero">
-            <div>
-              <p class="section-number">Ride lab / 05</p>
-              <h1>Follow your <em>progress.</em></h1>
-              <p class="intro-copy">Load several rides at once and follow a few measures from session to session: speed, turns, stops and how long you stay on the board.</p>
+        <section class="page body-page hidden" id="bodyPage" aria-live="polite">
+          <section class="analysis-empty panel" id="bodyEmpty">
+            <p class="empty-kicker">Body needs a ride</p>
+            <h2>Load a ride to see <span>the effort.</span></h2>
+            <button class="button button-primary" id="bodyLoadButton" type="button">Open ride</button>
+          </section>
+
+          <div class="dashboard hidden" id="dashboard">
+            <div class="metric-grid">
+              <article class="metric-card metric-featured">
+                <p class="metric-label">Elapsed time</p>
+                <strong id="metricDuration">—</strong>
+                <span class="metric-sub" id="metricTimer">total session</span>
+              </article>
+              <article class="metric-card">
+                <p class="metric-label">Distance ridden</p>
+                <strong id="metricDistance">—</strong>
+                <span class="metric-sub">recorded route</span>
+              </article>
+              <article class="metric-card">
+                <p class="metric-label">Average speed</p>
+                <strong id="metricAvgSpeed">—</strong>
+                <span class="metric-sub" id="metricMaxSpeed">max —</span>
+              </article>
+              <article class="metric-card">
+                <p class="metric-label">Heart rate</p>
+                <strong id="metricHeartRate">—</strong>
+                <span class="metric-sub" id="metricMaxHeartRate">max —</span>
+              </article>
             </div>
-            <div class="analysis-instruction panel">
-              <span class="analysis-instruction-number">01</span>
-              <div><strong>Pick what to follow</strong><p>Five measures are shown to start with. The Measures button adds more, such as best speeds, restarts and upwind progress.</p></div>
+
+            <section class="effort-panel panel" aria-live="polite">
+              <div class="panel-heading"><h3>Training load</h3></div>
+              <div class="effort-metric-grid">
+                <div class="effort-metric"><span>Reported TSS <button class="info-tip" type="button" aria-label="What is TSS?" data-tooltip="TSS means Training Stress Score. It estimates the overall load of a session from its duration and intensity relative to your threshold. Higher scores indicate a more demanding session.">?</button></span><strong id="effortTss">—</strong><small>duration and intensity load</small></div>
+                <div class="effort-metric"><span>Training Effect <button class="info-tip" type="button" aria-label="What is Training Effect?" data-tooltip="Training Effect estimates the session's impact on aerobic fitness from its duration and intensity. Higher scores indicate a stronger training stimulus.">?</button></span><strong id="effortTrainingEffect">—</strong><small>session score</small></div>
+                <div class="effort-metric"><span>Peak EPOC <button class="info-tip" type="button" aria-label="What is Peak EPOC?" data-tooltip="Peak EPOC estimates the highest accumulated excess oxygen demand during the session. Higher values generally indicate greater training load and recovery demand.">?</button></span><strong id="effortEpoc">—</strong><small>l/kg</small></div>
+                <div class="effort-metric"><span>Recovery time</span><strong id="effortRecovery">—</strong><small id="effortRecoveryEnd">recommended</small></div>
+              </div>
+              <div class="effort-zone-row">
+                <div class="effort-zone-heading"><span>Heart-rate zones</span><small>time in each zone</small></div>
+                <div class="effort-zone-grid">
+                  <div class="effort-zone"><span>Zone 1</span><strong id="effortZone1">—</strong></div>
+                  <div class="effort-zone"><span>Zone 2</span><strong id="effortZone2">—</strong></div>
+                  <div class="effort-zone"><span>Zone 3</span><strong id="effortZone3">—</strong></div>
+                  <div class="effort-zone"><span>Zone 4</span><strong id="effortZone4">—</strong></div>
+                  <div class="effort-zone"><span>Zone 5</span><strong id="effortZone5">—</strong></div>
+                </div>
+              </div>
+            </section>
+
+            <div class="content-grid">
+              <article class="panel chart-panel heart-panel">
+                <div class="panel-heading"><h3>Heart rate</h3><span class="chart-unit">bpm</span></div>
+                <div class="chart-wrap"><canvas id="heartChart" aria-label="Heart rate over time chart"></canvas><div class="chart-empty hidden" id="heartEmpty">No heart-rate records</div></div>
+                <div class="chart-footer"><span id="heartMin">min —</span><span class="chart-key"><i class="key-line heart-key"></i>heart rate</span><span id="heartMax">max —</span></div>
+              </article>
+
+              <article class="panel detail-panel">
+                <div class="panel-heading"><h3>At a glance</h3></div>
+                <dl class="detail-list">
+                  <div><dt>Started / Ended</dt><dd id="detailTimeRange">—</dd></div>
+                  <div><dt>Duration</dt><dd id="detailDuration">—</dd></div>
+                  <div><dt>Feeling</dt><dd id="detailFeeling">—</dd></div>
+                  <div><dt>Calories</dt><dd id="detailCalories">—</dd></div>
+                  <div><dt>Carbohydrates</dt><dd id="detailCarbs">—</dd></div>
+                  <div><dt>Fat</dt><dd id="detailFat">—</dd></div>
+                  <div><dt>Fat ratio <button class="info-tip" type="button" aria-label="What is fat ratio?" data-tooltip="Fat ratio is the estimated percentage of energy supplied by fat. This dashboard shows the average of the file's recorded samples.">?</button></dt><dd id="detailFatRatio">—</dd></div>
+                  <div><dt>Average NGP <button class="info-tip" type="button" aria-label="What is NGP?" data-tooltip="NGP means normalized graded pace: an effort-adjusted equivalent speed or pace that accounts for terrain or grade, making efforts easier to compare.">?</button></dt><dd id="detailAvgNgp">—</dd></div>
+                  <div><dt>Wind speed</dt><dd id="detailWindSpeed">—</dd></div>
+                </dl>
+              </article>
             </div>
+
+            <section class="panel recording-panel">
+              <div class="panel-heading"><h3>Recording</h3></div>
+              <dl class="detail-list">
+                <div><dt>Sport</dt><dd id="activitySport">—</dd></div>
+                <div><dt>Device</dt><dd id="activityDevice">Device not recorded</dd></div>
+                <div><dt>File</dt><dd id="activityFile">—</dd></div>
+                <div class="hidden" id="activityNote"><dt>Description</dt><dd id="activityDescription"></dd></div>
+              </dl>
+              <p class="recording-note" id="decoderNote"></p>
+            </section>
+
+            <section class="inventory-section panel">
+              <div class="inventory-heading"><h3>Data record</h3><button class="button button-secondary inventory-toggle" id="inventoryToggle" type="button" aria-controls="inventoryTableWrap" aria-expanded="false">Show inventory</button></div>
+              <div class="inventory-table-wrap hidden" id="inventoryTableWrap">
+                <table class="inventory-table">
+                  <thead><tr><th>Message</th><th>What it describes</th><th class="table-number">Count</th><th>Data points</th></tr></thead>
+                  <tbody id="inventoryBody"></tbody>
+                </table>
+              </div>
+            </section>
           </div>
+        </section>
+
+        <section class="page progress-page hidden" id="progressPage" aria-live="polite">
+          <input id="progressInput" type="file" accept=".fit,.FIT,application/octet-stream" multiple hidden />
 
           <section class="analysis-empty panel" id="progressEmpty">
             <p class="empty-kicker">Progress needs several rides</p>
-            <h2>Choose your FIT files<br /><span>all at once.</span></h2>
-            <p>Select as many rides as you like in the file dialog (hold Ctrl or Shift), or drop them on this page. They are read in the browser one after another. Nothing is uploaded or stored, and reloading the page forgets them.</p>
-            <button class="button button-primary" id="progressChooseButton" type="button">Choose FIT files <span class="button-icon">+</span></button>
+            <h2>Choose your rides <span>all at once.</span></h2>
+            <p>Pick several FIT files in the dialog, or drop them here. Nothing is uploaded or stored.</p>
+            <button class="button button-primary" id="progressChooseButton" type="button">Choose rides</button>
             <p class="progress-status hidden" id="progressEmptyStatus" role="status"></p>
           </section>
 
           <div class="coaching-body hidden" id="progressBody">
             <section class="coaching-panel panel progress-toolbar">
               <div class="panel-heading">
-                <div><p class="panel-kicker">Rides loaded</p><h3 id="progressTitle">Rides</h3></div>
-                <div class="progress-actions"><button class="button button-secondary" id="progressAddButton" type="button">Add rides <span>+</span></button><button class="text-button" id="progressClearButton" type="button">Remove all</button></div>
+                <h3 id="progressTitle">Rides</h3>
+                <div class="progress-actions"><button class="button button-secondary" id="progressAddButton" type="button">Add rides</button><button class="text-button" id="progressClearButton" type="button">Remove all</button></div>
               </div>
               <p class="coaching-copy" id="progressCopy"></p>
               <p class="progress-status hidden" id="progressStatus" role="status"></p>
@@ -530,8 +427,7 @@
             <div class="progress-grid" id="progressGrid"></div>
 
             <section class="coaching-panel panel">
-              <div class="panel-heading"><div><p class="panel-kicker">Ride by ride</p><h3>The same numbers as a table</h3></div><span class="chart-unit">bold = best ride for that measure</span></div>
-              <p class="coaching-copy">Open a ride to see it in full on the other pages.</p>
+              <div class="panel-heading"><h3>Ride by ride</h3><span class="chart-unit">bold = best ride for that measure</span></div>
               <div class="coaching-table-scroll">
                 <table class="coaching-table progress-table" id="progressTable"></table>
               </div>
