@@ -254,6 +254,8 @@ a { color: var(--link); }
 .empty-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; margin-top: 6px; }
 .drop-target { padding: 9px 14px; border: 2px dashed var(--line); border-radius: var(--radius-control); color: var(--muted); font-size: 14px; }
 .drop-target.dragging { border-color: var(--ink); background: var(--selected); color: var(--ink); }
+.demo-link { font-size: 14px; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
+.demo-link:hover { color: var(--ink); }
 
 /* Stat tiles: a row of big numbers with a label above and a note below. */
 .segments-stat-grid, .effort-metric-grid, .wind-coaching-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 16px -20px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
